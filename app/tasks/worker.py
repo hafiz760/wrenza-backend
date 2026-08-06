@@ -3,6 +3,8 @@ from arq.connections import RedisSettings
 
 from app.core.config import get_settings
 from app.tasks.email_tasks import (
+    send_contact_enquiry,
+    send_order_cancelled,
     send_order_confirmation,
     send_order_status_update,
     send_password_reset,
@@ -27,10 +29,14 @@ def get_redis_settings() -> RedisSettings:
 class WorkerSettings:
     """arq worker configuration."""
 
+    # Every job the queue can run. A name missing here is silently dropped
+    # at enqueue time, so this list and the enqueue calls must stay in step.
     functions = [
         send_order_confirmation,
         send_order_status_update,
+        send_order_cancelled,
         send_password_reset,
+        send_contact_enquiry,
     ]
 
     cron_jobs = [

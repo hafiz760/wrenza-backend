@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block content %}
+{# Written for someone packing orders, not for a customer. Everything needed
+   to pick, pack and call is above the fold. #}
+<p style="margin:0 0 4px;font-size:11px;letter-spacing:1.5px;color:#6b7280;
+          text-transform:uppercase;">New order</p>
+<p style="margin:0 0 20px;font-family:Georgia,'Times New Roman',serif;
+          font-size:28px;color:#e0a32e;">{{ order_number }}</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="margin:0 0 24px;background-color:#f5f5f5;">
+  <tr>
+    <td style="padding:16px 18px;border-left:3px solid #e0a32e;">
+      <p style="margin:0;font-weight:600;">{{ customer_name or "Guest" }}</p>
+      {% if phone %}
+      <p style="margin:4px 0 0;font-size:15px;">
+        <a href="tel:{{ phone }}" style="color:#111111;text-decoration:none;">{{ phone }}</a>
+      </p>
+      {% endif %}
+      {% if email %}
+      <p style="margin:2px 0 0;font-size:14px;color:#6b7280;">{{ email }}</p>
+      {% endif %}
+    </td>
+  </tr>
+</table>
+
+<p style="margin:0 0 6px;font-size:11px;letter-spacing:1.5px;color:#6b7280;
+          text-transform:uppercase;">To pack</p>
+{% include "_order_lines.html" %}
+
+<p style="margin:0 0 6px;font-size:11px;letter-spacing:1.5px;color:#6b7280;
+          text-transform:uppercase;">Ship to</p>
+<p style="margin:0 0 24px;line-height:1.6;">
+  {{ address.street }}<br />
+  {{ address.city }}, {{ address.state }} {{ address.postalCode }}
+</p>
+
+{% if notes %}
+<p style="margin:0 0 6px;font-size:11px;letter-spacing:1.5px;color:#6b7280;
+          text-transform:uppercase;">Customer note</p>
+<p style="margin:0 0 24px;padding:14px 16px;background-color:#f5f5f5;
+          font-size:14px;line-height:1.6;">{{ notes }}</p>
+{% endif %}
+
+<table role="presentation" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td style="background-color:#111111;">
+      <a href="{{ dashboard_url }}/dashboard/orders"
+         style="display:inline-block;padding:13px 26px;font-size:14px;
+                font-weight:600;color:#ffffff;text-decoration:none;">
+        Open in dashboard
+      </a>
+    </td>
+  </tr>
+</table>
+{% endblock %}

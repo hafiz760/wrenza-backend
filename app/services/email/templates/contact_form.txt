@@ -1,0 +1,10 @@
+ENQUIRY — {{ subject_line }}
+
+FROM
+{{ name }}
+{{ email }}
+
+MESSAGE
+{{ message }}
+
+Reply to this email and it goes straight to {{ name }}.

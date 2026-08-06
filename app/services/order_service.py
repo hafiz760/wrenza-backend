@@ -21,6 +21,7 @@ from app.schemas.order import (
     OrderStatusUpdate,
 )
 from app.schemas.common import PaginatedResponse
+from app.tasks.queue import enqueue
 
 FREE_SHIPPING_THRESHOLD = 5000  # PKR
 SHIPPING_COST = 250  # PKR
@@ -260,6 +261,10 @@ async def create_order(db: AsyncSession, user_id: str, data: OrderCreate) -> Ord
 
     await db.commit()
 
+    # Queued after the commit: the job loads the order by id, so it must exist
+    # before the worker can pick it up.
+    await enqueue("send_order_confirmation", str(order.id))
+
     # Refresh with relationships
     result = await db.execute(
         select(Order).options(selectinload(Order.items)).where(Order.id == order.id)
@@ -350,6 +355,8 @@ async def create_checkout_order(
         )
 
     await db.commit()
+
+    await enqueue("send_order_confirmation", str(order.id))
 
     # Re-fetch with relationships
     result = await db.execute(
@@ -443,6 +450,11 @@ async def update_order_status(
         order.tracking_number = data.tracking_number
 
     await db.commit()
+
+    # The task filters to shipped/delivered — sending on every internal
+    # transition trains customers to stop opening these.
+    await enqueue("send_order_status_update", str(order.id), new_status.value)
+
     # `updated_at` carries onupdate=func.now(), so it is server-generated and
     # expired by the UPDATE; reading it without refreshing lazy-loads outside
     # the async greenlet.
@@ -475,6 +487,9 @@ async def cancel_order(
     await _restore_stock(db, order)
     order.status = OrderStatus.CANCELLED.value
     await db.commit()
+
+    await enqueue("send_order_cancelled", str(order.id))
+
     await db.refresh(order)
     return _order_to_out(order)
 

@@ -62,6 +62,34 @@ def create_refresh_token(user_id: UUID) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+def create_password_reset_token(user_id: UUID) -> str:
+    """Short-lived, single-purpose token for a reset link.
+
+    `type` is `password_reset`, not `access`. That matters in both directions:
+    the auth dependency rejects any token whose type is not `access`, so this
+    one cannot be pasted as a bearer token to act as the user — and the reset
+    handler rejects anything that is not `password_reset`, so a stolen session
+    token cannot change a password.
+
+    Getting this wrong is not theoretical: with `type: access` the link emailed
+    to a customer doubled as a 30-minute API session for their account.
+
+    The `jti` lets the existing denylist mark it spent — one click, one reset,
+    even though the link stays in the inbox forever.
+    """
+    settings = get_settings()
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES
+    )
+    payload = {
+        "sub": str(user_id),
+        "exp": expire,
+        "type": "password_reset",
+        "jti": uuid4().hex,
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
 def decode_token(token: str) -> dict:
     settings = get_settings()
     try:

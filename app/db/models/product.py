@@ -23,6 +23,7 @@ from app.db.base import Base, TimestampMixin, UUIDMixin
 class Category(Base, UUIDMixin):
     __tablename__ = "categories"
 
+
     name: Mapped[str] = mapped_column(String(100))
     slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

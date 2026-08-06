@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Short by design: a reset link sits in an inbox, which is exactly where
+    # an attacker with mailbox access would look.
+    PASSWORD_RESET_EXPIRE_MINUTES: int = 30
 
     # Cloudinary
     CLOUDINARY_CLOUD_NAME: str = ""
@@ -67,6 +70,46 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+
+    # Email (Titan SMTP)
+    # Two mailboxes: order@ sends anything about an order so replies land with
+    # the order; info@ sends password resets and contact enquiries. Titan meters
+    # sending per mailbox, so the split also keeps the two from starving
+    # each other.
+    SMTP_HOST: str = "smtp.titan.email"
+    SMTP_PORT: int = 465
+    SMTP_FROM_NAME: str = "Wrenza"
+
+    SMTP_ORDER_USER: str = ""
+    SMTP_ORDER_PASSWORD: str = ""
+
+    SMTP_INFO_USER: str = ""
+    SMTP_INFO_PASSWORD: str = ""
+
+    # Where new-order alerts go
+    ADMIN_EMAIL: str = ""
+
+    # Base for links inside emails — reset links, order links
+    FRONTEND_URL: str = "http://localhost:3001"
+
+    # Logo shown at the top of every email. Must be a public https URL —
+    # mail clients cannot reach localhost, and Gmail proxies images through
+    # its own servers. Left blank, emails fall back to a text wordmark, which
+    # is also what recipients see when their client blocks images.
+    # Admin panel, for the "open in dashboard" link on new-order alerts
+    DASHBOARD_URL: str = "http://localhost:3000"
+
+    EMAIL_LOGO_URL: str = ""
+    EMAIL_LOGO_WIDTH: int = 132
+
+    @property
+    def email_enabled(self) -> bool:
+        """False when credentials are absent, e.g. in tests or a fresh clone.
+
+        Callers check this rather than discovering it as an SMTP error on a
+        background job nobody is watching.
+        """
+        return bool(self.SMTP_ORDER_PASSWORD or self.SMTP_INFO_PASSWORD)
 
     # Sentry
     SENTRY_DSN: str = ""

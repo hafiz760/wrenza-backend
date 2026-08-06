@@ -1,0 +1,57 @@
+{# Items and totals. Shared by every order email so the three can never
+   disagree about how an order is presented. #}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="margin:0 0 4px;">
+  {% for item in items %}
+  <tr>
+    <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;">
+      <p style="margin:0;font-weight:600;">{{ item.name }}</p>
+      <p style="margin:3px 0 0;font-size:13px;color:#6b7280;">
+        {% if item.options %}{{ item.options }} &middot; {% endif %}Qty {{ item.quantity }}
+      </p>
+    </td>
+    <td align="right" style="padding:12px 0;border-bottom:1px solid #e5e7eb;
+                             vertical-align:top;white-space:nowrap;font-weight:600;">
+      {{ item.line_total | money }}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td style="padding:10px 0 4px;color:#6b7280;font-size:14px;">Subtotal</td>
+    <td align="right" style="padding:10px 0 4px;font-size:14px;">{{ subtotal | money }}</td>
+  </tr>
+  {% if discount %}
+  <tr>
+    <td style="padding:4px 0;color:#6b7280;font-size:14px;">Discount</td>
+    <td align="right" style="padding:4px 0;font-size:14px;color:#e0a32e;">
+      &minus; {{ discount | money }}
+    </td>
+  </tr>
+  {% endif %}
+  <tr>
+    <td style="padding:4px 0 12px;color:#6b7280;font-size:14px;">Delivery</td>
+    <td align="right" style="padding:4px 0 12px;font-size:14px;">
+      {% if shipping %}{{ shipping | money }}{% else %}Free{% endif %}
+    </td>
+  </tr>
+</table>
+
+{# Second and final stitch, marking the total as the line that matters. #}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td style="border-top:2px dashed #e0a32e;font-size:0;line-height:0;">&nbsp;</td>
+  </tr>
+</table>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="margin:0 0 24px;">
+  <tr>
+    <td style="padding:14px 0 0;font-family:Georgia,'Times New Roman',serif;
+               font-size:16px;">Total</td>
+    <td align="right" style="padding:14px 0 0;font-family:Georgia,'Times New Roman',serif;
+               font-size:22px;color:#e0a32e;">{{ total | money }}</td>
+  </tr>
+</table>

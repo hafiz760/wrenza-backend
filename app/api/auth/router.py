@@ -66,13 +66,19 @@ async def update_me(data: UserUpdate, user: CurrentUser, db: DbSession):
 
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(data: ForgotPasswordRequest, db: DbSession):
-    # TODO: Generate reset token and enqueue email task
+    """Send a reset link, if the address belongs to an account.
+
+    The reply is identical either way. Saying "no such account" would let
+    anyone test which addresses are registered here.
+    """
+    await auth_service.request_password_reset(db, data.email)
     return MessageResponse(
         message="If an account with that email exists, a password reset link has been sent."
     )
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(data: ResetPasswordRequest, db: DbSession):
-    # TODO: Validate token and update password
+async def reset_password(data: ResetPasswordRequest, db: DbSession, redis: RedisClient):
+    """Set a new password from a reset link. The link works once."""
+    await auth_service.reset_password(db, redis, data.token, data.new_password)
     return MessageResponse(message="Password has been reset successfully.")

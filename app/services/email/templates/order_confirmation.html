@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+{# The order number leads. It is the thing a customer comes back to this
+   email for, and the thing they quote when they ask about delivery. #}
+<p style="margin:0 0 4px;font-size:11px;letter-spacing:1.5px;color:#6b7280;
+          text-transform:uppercase;">Order confirmed</p>
+<p style="margin:0 0 20px;font-family:Georgia,'Times New Roman',serif;
+          font-size:28px;color:#e0a32e;">{{ order_number }}</p>
+
+<p style="margin:0 0 24px;">
+  Thank you{% if customer_name %}, {{ customer_name }}{% endif %}. Your order is
+  with us and we will email you the moment it ships.
+</p>
+
+{% include "_order_lines.html" %}
+
+{# Cash on delivery is the only payment method, so the amount to have ready
+   is the most useful thing this email can tell someone. #}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="margin:0 0 24px;background-color:#f5f5f5;">
+  <tr>
+    <td style="padding:16px 18px;border-left:3px solid #e0a32e;">
+      <p style="margin:0;font-weight:600;">Cash on delivery</p>
+      <p style="margin:4px 0 0;font-size:14px;color:#6b7280;">
+        Have {{ total | money }} ready when the courier arrives. Nothing to pay now.
+      </p>
+    </td>
+  </tr>
+</table>
+
+<p style="margin:0 0 6px;font-size:11px;letter-spacing:1.5px;color:#6b7280;
+          text-transform:uppercase;">Delivering to</p>
+<p style="margin:0 0 24px;line-height:1.6;">
+  {{ address.street }}<br />
+  {{ address.city }}, {{ address.state }} {{ address.postalCode }}
+  {% if phone %}<br />{{ phone }}{% endif %}
+</p>
+
+<p style="margin:0;font-size:14px;color:#6b7280;">
+  Something wrong with the address or the order? Reply to this email —
+  we can still change it before it ships.
+</p>
+{% endblock %}

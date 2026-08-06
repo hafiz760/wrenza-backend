@@ -6,8 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+import structlog
+
 from app.core.security import (
     create_access_token,
+    create_password_reset_token,
     create_refresh_token,
     decode_token,
     hash_password,
@@ -18,6 +21,9 @@ from app.core.security import (
 from app.db.models.user import User, UserRole
 from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, TokenResponse
 from app.schemas.user import UserOut
+from app.tasks.queue import enqueue
+
+logger = structlog.get_logger()
 
 
 def _build_tokens(user: User) -> TokenResponse:
@@ -192,3 +198,49 @@ async def update_me(db: AsyncSession, user_id: UUID, data: dict) -> UserOut:
 
     await db.commit()
     return _user_to_out(user)
+
+
+async def request_password_reset(db: AsyncSession, email: str) -> None:
+    """Issue a reset token and queue the email.
+
+    Silent about whether the account exists — the endpoint answers identically
+    either way. A reply that differs by account would let anyone check which
+    of their addresses are registered here.
+    """
+    user = await db.scalar(select(User).where(User.email == email.lower()))
+    if not user:
+        logger.info("Password reset requested for unknown email", email=email)
+        return
+
+    token = create_password_reset_token(user.id)
+    await enqueue("send_password_reset", user.email, token)
+
+
+async def reset_password(
+    db: AsyncSession, redis: Redis, token: str, new_password: str
+) -> None:
+    """Consume a reset token and set the new password.
+
+    The same 400 covers every failure — expired, forged, wrong purpose, already
+    used. Distinguishing them would tell an attacker which part to fix.
+    """
+    payload = decode_token(token)
+
+    # Checked against `type`, the same field the auth dependency screens on,
+    # so the two can never disagree about what a token is for.
+    if not payload or payload.get("type") != "password_reset":
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired.")
+
+    if await is_token_revoked(redis, payload):
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired.")
+
+    user = await db.scalar(select(User).where(User.id == payload.get("sub")))
+    if not user:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired.")
+
+    user.password_hash = await hash_password(new_password)
+    await db.commit()
+
+    # Spend the token: the link stays in the inbox forever, so without this a
+    # second click would reset the password again.
+    await revoke_token(redis, payload)

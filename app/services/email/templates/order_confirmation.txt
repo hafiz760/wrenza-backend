@@ -1,0 +1,27 @@
+ORDER CONFIRMED — {{ order_number }}
+
+Thank you{% if customer_name %}, {{ customer_name }}{% endif %}. Your order is with us
+and we will email you the moment it ships.
+
+{% for item in items -%}
+{{ item.name }}
+  {% if item.options %}{{ item.options }} · {% endif %}Qty {{ item.quantity }} — {{ item.line_total | money }}
+{% endfor %}
+Subtotal   {{ subtotal | money }}
+{% if discount %}Discount   − {{ discount | money }}
+{% endif %}Delivery   {% if shipping %}{{ shipping | money }}{% else %}Free{% endif %}
+TOTAL      {{ total | money }}
+
+CASH ON DELIVERY
+Have {{ total | money }} ready when the courier arrives. Nothing to pay now.
+
+DELIVERING TO
+{{ address.street }}
+{{ address.city }}, {{ address.state }} {{ address.postalCode }}
+{% if phone %}{{ phone }}
+{% endif %}
+Something wrong with the address or the order? Reply to this email —
+we can still change it before it ships.
+
+—
+Wrenza. Cut and stitched by hand in Lahore.

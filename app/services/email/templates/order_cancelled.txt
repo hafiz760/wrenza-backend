@@ -1,0 +1,18 @@
+ORDER CANCELLED — {{ order_number }}
+
+{% if customer_name %}{{ customer_name }}, this{% else %}This{% endif %} order has been cancelled.
+Nothing will be delivered and there is nothing to pay.
+
+If you did not ask for this, reply to this email and we will look into it.
+
+WHAT WAS CANCELLED
+{% for item in items -%}
+{{ item.name }}
+  {% if item.options %}{{ item.options }} · {% endif %}Qty {{ item.quantity }} — {{ item.line_total | money }}
+{% endfor %}
+TOTAL      {{ total | money }}
+
+Browse the collection: {{ frontend_url }}/products
+
+—
+Wrenza. Cut and stitched by hand in Lahore.

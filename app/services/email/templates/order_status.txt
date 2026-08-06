@@ -1,0 +1,30 @@
+{% if status == "shipped" %}ON ITS WAY{% else %}DELIVERED{% endif %} — {{ order_number }}
+
+{% if status == "shipped" %}{% if customer_name %}{{ customer_name }}, your{% else %}Your{% endif %} order has left our workshop and is with the courier.
+{% if tracking_number %}
+TRACKING NUMBER
+{{ tracking_number }}
+{% endif %}
+Most orders reach Lahore, Karachi and Islamabad in two to three days,
+and the rest of Pakistan in three to five.
+{% else %}{% if customer_name %}{{ customer_name }}, your{% else %}Your{% endif %} order has been delivered. We hope it was worth the wait.
+
+LOOKING AFTER IT
+Full-grain leather darkens where you handle it most. That is the hide
+behaving correctly, not a fault. Keep it out of prolonged damp and
+condition it every six months.
+{% endif %}
+
+YOUR ORDER
+{% for item in items -%}
+{{ item.name }}
+  {% if item.options %}{{ item.options }} · {% endif %}Qty {{ item.quantity }} — {{ item.line_total | money }}
+{% endfor %}
+TOTAL      {{ total | money }}
+
+{% if status == "shipped" %}Anything not right when it arrives? Reply to this email —
+you have seven days to return it.{% else %}Not right for you? Reply to this email within seven days
+and we will arrange a return.{% endif %}
+
+—
+Wrenza. Cut and stitched by hand in Lahore.

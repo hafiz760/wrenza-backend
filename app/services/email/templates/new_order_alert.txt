@@ -1,0 +1,21 @@
+NEW ORDER — {{ order_number }}
+
+{{ customer_name or "Guest" }}
+{% if phone %}{{ phone }}
+{% endif %}{% if email %}{{ email }}
+{% endif %}
+TO PACK
+{% for item in items -%}
+{{ item.name }}
+  {% if item.options %}{{ item.options }} · {% endif %}Qty {{ item.quantity }} — {{ item.line_total | money }}
+{% endfor %}
+TOTAL      {{ total | money }}  (cash on delivery)
+
+SHIP TO
+{{ address.street }}
+{{ address.city }}, {{ address.state }} {{ address.postalCode }}
+{% if notes %}
+CUSTOMER NOTE
+{{ notes }}
+{% endif %}
+Open in dashboard: {{ dashboard_url }}/dashboard/orders

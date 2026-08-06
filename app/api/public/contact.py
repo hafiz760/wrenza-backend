@@ -6,6 +6,7 @@ from app.core.deps import DbSession
 from app.db.models.contact import ContactSubmission, NewsletterSubscriber
 from app.schemas.common import MessageResponse
 from app.schemas.contact import ContactForm, NewsletterSubscribe
+from app.tasks.queue import enqueue
 
 router = APIRouter(tags=["Contact"])
 
@@ -20,6 +21,17 @@ async def submit_contact(data: ContactForm, db: DbSession):
     )
     db.add(submission)
     await db.commit()
+
+    # Stored and emailed. The row is the record; the email is what makes
+    # anyone read it — there is no admin screen for these yet.
+    await enqueue(
+        "send_contact_enquiry",
+        data.name,
+        data.email,
+        data.subject,
+        data.message,
+    )
+
     return MessageResponse(message="Thank you for contacting us. We'll get back to you soon.")
 
 

@@ -30,6 +30,13 @@ async def lifespan(app: FastAPI):
         sentry_sdk.init(dsn=settings.SENTRY_DSN, traces_sample_rate=0.1)
         logger.info("Sentry initialized")
 
+    # Background job queue. Emails are sent from the worker, not the request,
+    # so a slow SMTP handshake never delays a checkout response.
+    from app.tasks.queue import close_queue, init_queue
+
+    if await init_queue():
+        logger.info("Task queue connected")
+
     base_url = f"http://{settings.HOST}:{settings.PORT}"
     print(f"\n  Wrenza API   {base_url}")
     print(f"  Swagger UI   {base_url}/docs")
@@ -39,6 +46,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    await close_queue()
     await app.state.redis.close()
     logger.info("Redis connection closed")
 
