@@ -11,6 +11,7 @@ from app.schemas.promotion import (
     DiscountCreate,
     DiscountUpdate,
 )
+from app.utils.casing import camelize
 
 
 # --- Discounts ---
@@ -53,7 +54,7 @@ async def apply_discount(db: AsyncSession, code: str) -> None:
 
 
 def _discount_to_out(d: Discount) -> dict:
-    return {
+    return camelize({
         "id": str(d.id),
         "code": d.code,
         "percentage": d.percentage,
@@ -63,7 +64,7 @@ def _discount_to_out(d: Discount) -> dict:
         "expires_at": d.expires_at.isoformat() if d.expires_at else None,
         "is_active": d.is_active,
         "created_at": d.created_at.isoformat() if d.created_at else None,
-    }
+    })
 
 
 async def list_discounts(db: AsyncSession) -> list[dict]:
@@ -116,16 +117,19 @@ async def delete_discount(db: AsyncSession, discount_id: str) -> None:
 # --- Banners ---
 
 def _banner_to_out(b: Banner) -> dict:
-    return {
+    return camelize({
         "id": str(b.id),
         "title": b.title,
         "image_url": b.image_url,
+        "video_url": b.video_url,
+        # Lets the frontend branch without inspecting the URL
+        "media_type": "video" if b.video_url else "image",
         "link": b.link,
         "position": b.position,
         "active_from": b.active_from.isoformat() if b.active_from else None,
         "active_to": b.active_to.isoformat() if b.active_to else None,
         "is_active": b.is_active,
-    }
+    })
 
 
 async def list_active_banners(db: AsyncSession) -> list[dict]:
@@ -151,6 +155,7 @@ async def create_banner(db: AsyncSession, data: BannerCreate) -> dict:
     banner = Banner(
         title=data.title,
         image_url=data.image_url,
+        video_url=data.video_url,
         link=data.link,
         position=data.position,
         active_from=data.active_from,

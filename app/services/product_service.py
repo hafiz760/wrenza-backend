@@ -6,8 +6,12 @@ from sqlalchemy import select, desc, asc, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.db.models.attribute import Attribute, AttributeTerm
 from app.db.models.product import Product, ProductImage, Category
+from app.db.models.variation import ProductAttribute, ProductAttributeTerm
 from app.schemas.product import (
+    PriceRange,
+    ProductSwatchOut,
     ProductCreate,
     ProductImageOut,
     ProductListOut,
@@ -15,6 +19,15 @@ from app.schemas.product import (
     ProductUpdate,
 )
 from app.schemas.common import PaginatedResponse
+from app.schemas.faq import FaqOut
+from app.schemas.filters import (
+    FilterAttributeOut,
+    FilterTermOut,
+    PriceBoundsOut,
+    ProductFiltersOut,
+)
+from app.schemas.variation import ProductAttributeOut, VariationOut
+from app.services import faq_service, variation_service
 from app.utils.cache import (
     TTL_LONG,
     TTL_MEDIUM,
@@ -53,13 +66,84 @@ def _split_images(p: Product) -> tuple[ProductImageOut | None, list[ProductImage
     return (gallery_out[0] if gallery_out else None), gallery_out
 
 
-def _product_to_list_out(p: Product) -> ProductListOut:
+def _derived(p: Product) -> tuple[float, PriceRange | None, int]:
+    """Price, price range and stock for a product.
+
+    Simple products own their price and stock. For variable products both are
+    derived from the active variations, so the two can never disagree.
+    """
+    if p.kind != "variable":
+        return float(p.price), None, p.stock
+
+    active = [v for v in p.variations if v.is_active]
+    if not active:
+        return float(p.price), None, 0
+
+    prices = [float(v.price) for v in active]
+    return (
+        min(prices),
+        PriceRange(min=min(prices), max=max(prices)),
+        sum(v.stock for v in active),
+    )
+
+
+async def load_swatches(
+    db: AsyncSession, products: list[Product]
+) -> dict[str, list[ProductSwatchOut]]:
+    """Colour options per product, for the swatch row on a card.
+
+    One query for the whole page rather than one per product: a 12-card grid
+    would otherwise cost 12 round-trips for decoration.
+    """
+    if not products:
+        return {}
+
+    rows = await db.execute(
+        select(
+            ProductAttribute.product_id,
+            AttributeTerm.id,
+            AttributeTerm.value,
+            AttributeTerm.slug,
+            AttributeTerm.meta,
+        )
+        .join(
+            ProductAttributeTerm,
+            ProductAttributeTerm.product_attribute_id == ProductAttribute.id,
+        )
+        .join(AttributeTerm, AttributeTerm.id == ProductAttributeTerm.term_id)
+        .where(ProductAttribute.product_id.in_([str(p.id) for p in products]))
+        .order_by(AttributeTerm.position, AttributeTerm.value)
+    )
+
+    swatches: dict[str, list[ProductSwatchOut]] = {}
+    for product_id, term_id, value, slug, meta in rows.all():
+        # A colour term is one the admin gave a swatch hex; everything else is
+        # a size or a finish and has nothing to show as a dot
+        hex_value = (meta or {}).get("hex")
+        if not hex_value:
+            continue
+        swatches.setdefault(str(product_id), []).append(
+            ProductSwatchOut(
+                term_id=str(term_id), value=value, slug=slug, hex=hex_value
+            )
+        )
+
+    return swatches
+
+
+def _product_to_list_out(
+    p: Product, swatches: list[ProductSwatchOut] | None = None
+) -> ProductListOut:
     featured, gallery = _split_images(p)
+    price, price_range, stock = _derived(p)
     return ProductListOut(
+        kind=p.kind,
+        swatches=swatches or [],
         id=str(p.id),
         slug=p.slug,
         name=p.name,
-        price=float(p.price),
+        price=price,
+        price_range=price_range,
         compare_at_price=float(p.compare_at_price) if p.compare_at_price else None,
         currency=p.currency,
         featured_image=featured,
@@ -67,39 +151,46 @@ def _product_to_list_out(p: Product) -> ProductListOut:
         category=p.category.slug if p.category else None,
         rating=float(p.rating),
         review_count=p.review_count,
-        stock=p.stock,
+        stock=stock,
         is_featured=p.is_featured,
         is_new_arrival=p.is_new_arrival,
     )
 
 
-def _product_to_full_out(p: Product) -> ProductOut:
+def _product_to_full_out(
+    p: Product,
+    attributes: list[ProductAttributeOut] | None = None,
+    variations: list[VariationOut] | None = None,
+    faqs: list[FaqOut] | None = None,
+) -> ProductOut:
     featured, gallery = _split_images(p)
+    price, price_range, stock = _derived(p)
     return ProductOut(
+        attributes=attributes or [],
+        variations=variations or [],
+        faqs=faqs or [],
         id=str(p.id),
         slug=p.slug,
         name=p.name,
+        sku=p.sku,
+        canonical_url=p.canonical_url,
+        og_image=p.og_image,
+        short_description=p.short_description,
         description=p.description,
-        price=float(p.price),
+        kind=p.kind,
+        price=price,
+        price_range=price_range,
         compare_at_price=float(p.compare_at_price) if p.compare_at_price else None,
         currency=p.currency,
         featured_image=featured,
         images=gallery,
         category=p.category.slug if p.category else None,
-        product_type=p.product_type,
-        material=p.material,
-        leather_type=p.leather_type,
         dimensions=p.dimensions or {},
-        hardware_finish=p.hardware_finish,
-        closure_type=p.closure_type,
-        sizes=p.sizes or [],
-        colors=p.colors or [],
-        fabric=p.fabric,
         care_instructions=p.care_instructions or [],
         tags=p.tags or [],
         rating=float(p.rating),
         review_count=p.review_count,
-        stock=p.stock,
+        stock=stock,
         is_featured=p.is_featured,
         is_new_arrival=p.is_new_arrival,
         created_at=p.created_at,
@@ -114,11 +205,8 @@ async def list_products(
     min_price: float | None = None,
     max_price: float | None = None,
     product_type: str | None = None,
-    material: str | None = None,
-    leather_type: str | None = None,
-    sizes: str | None = None,
-    colors: str | None = None,
-    fabric: str | None = None,
+    attribute_terms: list[str] | None = None,
+    ids: list[str] | None = None,
     sort_by: str | None = None,
     search: str | None = None,
     page: int = 1,
@@ -130,6 +218,15 @@ async def list_products(
         .where(Product.is_active.is_(True))
     )
 
+    if ids is not None:
+        # Explicit id list — used by collections and the wishlist to resolve
+        # stored references in one request instead of one call per product.
+        # An empty list means "nothing selected", not "no filter".
+        if not ids:
+            return PaginatedResponse(
+                items=[], total=0, page=page, page_size=page_size, total_pages=0
+            )
+        query = query.where(Product.id.in_(ids))
     if category:
         query = query.join(Category).where(Category.slug == category)
     if min_price is not None:
@@ -138,20 +235,31 @@ async def list_products(
         query = query.where(Product.price <= max_price)
     if product_type:
         query = query.where(Product.product_type == product_type)
-    if material:
-        query = query.where(Product.material.ilike(f"%{material}%"))
-    if leather_type:
-        query = query.where(Product.leather_type.ilike(f"%{leather_type}%"))
-    if fabric:
-        query = query.where(Product.fabric.ilike(f"%{fabric}%"))
+    if attribute_terms:
+        # AND across terms: ?leather-color=black&hardware=silver must match a
+        # product offering both, not either.
+        for term_slug in attribute_terms:
+            query = query.where(
+                Product.id.in_(
+                    select(ProductAttribute.product_id)
+                    .join(
+                        ProductAttributeTerm,
+                        ProductAttributeTerm.product_attribute_id
+                        == ProductAttribute.id,
+                    )
+                    .join(
+                        AttributeTerm,
+                        AttributeTerm.id == ProductAttributeTerm.term_id,
+                    )
+                    .where(AttributeTerm.slug == term_slug)
+                )
+            )
     if search:
         query = query.where(
             or_(
                 Product.name.ilike(f"%{search}%"),
                 Product.description.ilike(f"%{search}%"),
                 Product.tags.cast(str).ilike(f"%{search}%"),
-                Product.material.ilike(f"%{search}%"),
-                Product.leather_type.ilike(f"%{search}%"),
             )
         )
 
@@ -168,7 +276,10 @@ async def list_products(
 
     result = await paginate(query, page, page_size, db)
 
-    items = [_product_to_list_out(p) for p in result["items"]]
+    swatches = await load_swatches(db, result["items"])
+    items = [
+        _product_to_list_out(p, swatches.get(str(p.id))) for p in result["items"]
+    ]
 
     return PaginatedResponse(
         items=items,
@@ -179,10 +290,205 @@ async def list_products(
     )
 
 
+async def list_products_admin(
+    db: AsyncSession,
+    status: str = "active",
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> PaginatedResponse[ProductListOut]:
+    """Product list for the admin panel.
+
+    Separate from the public list because the rules are opposite: the storefront
+    must never show an inactive product, while the admin must be able to see one
+    — otherwise "deleting" a product, which only clears `is_active`, hides it
+    from the person who needs to restore it.
+
+    `status` is "active", "trashed", or "all".
+    """
+    query = (
+        select(Product)
+        .options(selectinload(Product.images), selectinload(Product.category))
+        .order_by(desc(Product.created_at))
+    )
+
+    if status == "active":
+        query = query.where(Product.is_active.is_(True))
+    elif status == "trashed":
+        query = query.where(Product.is_active.is_(False))
+
+    if search:
+        term = f"%{search}%"
+        query = query.where(
+            or_(
+                Product.name.ilike(term),
+                Product.slug.ilike(term),
+                Product.sku.ilike(term),
+            )
+        )
+
+    result = await paginate(query, page, page_size, db)
+    swatches = await load_swatches(db, result["items"])
+
+    return PaginatedResponse(
+        items=[
+            _product_to_list_out(p, swatches.get(str(p.id))) for p in result["items"]
+        ],
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+        total_pages=result["total_pages"],
+    )
+
+
+async def count_by_status(db: AsyncSession) -> dict[str, int]:
+    """Active and trashed counts, for the admin's tab badges."""
+    rows = await db.execute(
+        select(Product.is_active, func.count(Product.id)).group_by(Product.is_active)
+    )
+    counts = {"active": 0, "trashed": 0}
+    for is_active, total in rows.all():
+        counts["active" if is_active else "trashed"] = total
+    counts["all"] = counts["active"] + counts["trashed"]
+    return counts
+
+
+async def restore_product(
+    db: AsyncSession, redis: Redis | None, product_id: str
+) -> ProductOut:
+    """Bring a trashed product back. The inverse of `delete_product`."""
+    product = await db.scalar(
+        select(Product)
+        .options(
+            selectinload(Product.images),
+            selectinload(Product.category),
+            selectinload(Product.variations),
+        )
+        .where(Product.id == product_id)
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    product.is_active = True
+    await db.commit()
+    await db.refresh(product)
+
+    if redis:
+        await cache_delete_pattern(redis, "products:*")
+
+    attributes, variations = await _load_options(db, product)
+    faqs = await faq_service.list_for_product(db, str(product.id))
+    return _product_to_full_out(product, attributes, variations, faqs)
+
+
+async def purge_product(db: AsyncSession, redis: Redis | None, product_id: str) -> None:
+    """Delete a product for good.
+
+    Only permitted on an already-trashed product, so a live product can never
+    be destroyed by a single misdirected call.
+
+    Order history survives: `order_items.product_id` is ON DELETE SET NULL and
+    each line carries its own product snapshot, so past orders stay readable.
+    Images, variations, attributes, FAQs and reviews cascade away with it.
+    """
+    product = await db.scalar(select(Product).where(Product.id == product_id))
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    if product.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Move the product to trash before deleting it permanently.",
+        )
+
+    await db.delete(product)
+    await db.commit()
+
+    if redis:
+        await cache_delete_pattern(redis, "products:*")
+
+
+async def get_filters(db: AsyncSession) -> ProductFiltersOut:
+    """Facets for the catalog filter sidebar.
+
+    Only filterable attributes, and only terms at least one active product
+    actually offers — showing an option that yields an empty result set is
+    worse than not showing it.
+    """
+    counts = await db.execute(
+        select(
+            AttributeTerm.attribute_id,
+            AttributeTerm.id,
+            AttributeTerm.value,
+            AttributeTerm.slug,
+            AttributeTerm.meta,
+            func.count(func.distinct(Product.id)).label("product_count"),
+        )
+        .join(ProductAttributeTerm, ProductAttributeTerm.term_id == AttributeTerm.id)
+        .join(
+            ProductAttribute,
+            ProductAttribute.id == ProductAttributeTerm.product_attribute_id,
+        )
+        .join(Product, Product.id == ProductAttribute.product_id)
+        .join(Attribute, Attribute.id == AttributeTerm.attribute_id)
+        .where(Product.is_active.is_(True), Attribute.is_filterable.is_(True))
+        # Grouped by primary key alone: `meta` is json, which Postgres has no
+        # equality operator for and so cannot group by. The remaining columns
+        # are functionally dependent on the key, which Postgres accepts.
+        .group_by(AttributeTerm.id)
+        .order_by(AttributeTerm.value)
+    )
+
+    grouped: dict[str, list[FilterTermOut]] = {}
+    for attribute_id, term_id, value, slug, meta, count in counts.all():
+        grouped.setdefault(str(attribute_id), []).append(
+            FilterTermOut(
+                id=str(term_id),
+                value=value,
+                slug=slug,
+                meta=meta or {},
+                product_count=count,
+            )
+        )
+
+    attributes: list[FilterAttributeOut] = []
+    if grouped:
+        rows = await db.execute(
+            select(Attribute)
+            .where(Attribute.id.in_(list(grouped)))
+            .order_by(Attribute.position, Attribute.name)
+        )
+        attributes = [
+            FilterAttributeOut(
+                id=str(attr.id),
+                name=attr.name,
+                slug=attr.slug,
+                terms=grouped[str(attr.id)],
+            )
+            for attr in rows.scalars().all()
+        ]
+
+    bounds = await db.execute(
+        select(func.min(Product.price), func.max(Product.price)).where(
+            Product.is_active.is_(True)
+        )
+    )
+    low, high = bounds.one()
+
+    return ProductFiltersOut(
+        attributes=attributes,
+        price=PriceBoundsOut(min=float(low or 0), max=float(high or 0)),
+    )
+
+
 async def get_by_slug(db: AsyncSession, redis: Redis | None, slug: str) -> ProductOut:
     result = await db.execute(
         select(Product)
-        .options(selectinload(Product.images), selectinload(Product.category))
+        .options(
+            selectinload(Product.images),
+            selectinload(Product.category),
+            selectinload(Product.variations),
+        )
         .where(Product.slug == slug, Product.is_active.is_(True))
     )
     product = result.scalar_one_or_none()
@@ -190,7 +496,29 @@ async def get_by_slug(db: AsyncSession, redis: Redis | None, slug: str) -> Produ
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    return _product_to_full_out(product)
+    attributes, variations = await _load_options(db, product)
+    faqs = await faq_service.list_for_product(db, str(product.id))
+    return _product_to_full_out(product, attributes, variations, faqs)
+
+
+async def _load_options(
+    db: AsyncSession, p: Product
+) -> tuple[list[ProductAttributeOut], list[VariationOut]]:
+    """Attributes and buyable variations for the public product detail.
+
+    Attributes load for every product: a simple product can carry them with
+    `used_for_variations=False`, where they act as displayed specifications.
+    Variations only exist for variable products, and only active ones are
+    public — an inactive variation is not purchasable, so offering it as an
+    option would dead-end at checkout.
+    """
+    attributes = await variation_service.get_product_attributes(db, str(p.id))
+
+    if p.kind != "variable":
+        return attributes, []
+
+    variations = await variation_service.load_active_variations(db, str(p.id))
+    return attributes, variations
 
 
 async def get_featured(
@@ -203,8 +531,9 @@ async def get_featured(
         .order_by(desc(Product.created_at))
         .limit(limit)
     )
-    products = result.scalars().all()
-    return [_product_to_list_out(p) for p in products]
+    products = list(result.scalars().all())
+    swatches = await load_swatches(db, products)
+    return [_product_to_list_out(p, swatches.get(str(p.id))) for p in products]
 
 
 async def get_new_arrivals(
@@ -217,8 +546,9 @@ async def get_new_arrivals(
         .order_by(desc(Product.created_at))
         .limit(limit)
     )
-    products = result.scalars().all()
-    return [_product_to_list_out(p) for p in products]
+    products = list(result.scalars().all())
+    swatches = await load_swatches(db, products)
+    return [_product_to_list_out(p, swatches.get(str(p.id))) for p in products]
 
 
 async def get_related(
@@ -239,8 +569,9 @@ async def get_related(
         .order_by(desc(Product.rating))
         .limit(limit)
     )
-    products = result.scalars().all()
-    return [_product_to_list_out(p) for p in products]
+    products = list(result.scalars().all())
+    swatches = await load_swatches(db, products)
+    return [_product_to_list_out(p, swatches.get(str(p.id))) for p in products]
 
 
 async def create_product(
@@ -252,20 +583,17 @@ async def create_product(
     product = Product(
         slug=slug,
         name=data.name,
+        sku=data.sku,
+        canonical_url=data.canonical_url,
+        og_image=data.og_image,
+        short_description=data.short_description,
         description=data.description,
+        kind=data.kind,
         price=data.price,
         compare_at_price=data.compare_at_price,
         category_id=data.category_id,
         product_type=data.product_type,
-        material=data.material,
-        leather_type=data.leather_type,
         dimensions=data.dimensions.model_dump(),
-        hardware_finish=data.hardware_finish,
-        closure_type=data.closure_type,
-        fabric=data.fabric,
-        gender=data.gender,
-        sizes=[s.model_dump() for s in data.sizes],
-        colors=[c.model_dump() for c in data.colors],
         care_instructions=data.care_instructions,
         tags=data.tags,
         stock=data.stock,
@@ -339,16 +667,6 @@ async def update_product(
         )
 
     # Convert nested Pydantic models to dicts for JSONB
-    if "sizes" in update_data and update_data["sizes"] is not None:
-        update_data["sizes"] = [
-            s.model_dump() if hasattr(s, "model_dump") else s
-            for s in update_data["sizes"]
-        ]
-    if "colors" in update_data and update_data["colors"] is not None:
-        update_data["colors"] = [
-            c.model_dump() if hasattr(c, "model_dump") else c
-            for c in update_data["colors"]
-        ]
     if "dimensions" in update_data and update_data["dimensions"] is not None:
         update_data["dimensions"] = (
             update_data["dimensions"].model_dump()
@@ -363,17 +681,51 @@ async def update_product(
             if img.is_featured:
                 await db.delete(img)
         await db.flush()
+        # `exclude_unset` drops nested defaults too, so a client sending only
+        # {url, alt} — which is all ImageKit gives us — arrives without
+        # dimensions. They are optional metadata, not a reason to fail.
         db.add(
             ProductImage(
                 product_id=product.id,
                 url=featured_data["url"],
-                alt=featured_data["alt"],
-                width=featured_data["width"],
-                height=featured_data["height"],
+                alt=featured_data.get("alt", ""),
+                width=featured_data.get("width", 0),
+                height=featured_data.get("height", 0),
                 position=-1,
                 is_featured=True,
             )
         )
+
+    # Gallery sent as a whole, in display order. Reconciled rather than wiped
+    # and rebuilt so unchanged images keep their ids — a variation or an order
+    # snapshot may already point at one.
+    gallery_data = update_data.pop("images", None)
+    if gallery_data is not None:
+        wanted = {image["url"]: index for index, image in enumerate(gallery_data)}
+
+        for img in product.images:
+            if img.is_featured:
+                continue
+            if img.url in wanted:
+                img.position = wanted[img.url]
+            else:
+                await db.delete(img)
+
+        existing_urls = {img.url for img in product.images if not img.is_featured}
+        for image in gallery_data:
+            if image["url"] in existing_urls:
+                continue
+            db.add(
+                ProductImage(
+                    product_id=product.id,
+                    url=image["url"],
+                    alt=image.get("alt", ""),
+                    width=image.get("width", 0),
+                    height=image.get("height", 0),
+                    position=wanted[image["url"]],
+                    is_featured=False,
+                )
+            )
 
     for key, value in update_data.items():
         if hasattr(product, key):
@@ -381,11 +733,15 @@ async def update_product(
 
     await db.commit()
 
-    # Re-fetch with relationships for full output
+    # Re-fetch with relationships for full output. `populate_existing` is
+    # required: the row is already in the identity map with the image
+    # collection loaded before the edit, so without it the response echoes the
+    # gallery as it was and the change looks like it did not save.
     result = await db.execute(
         select(Product)
         .options(selectinload(Product.images), selectinload(Product.category))
         .where(Product.id == product.id)
+        .execution_options(populate_existing=True)
     )
     product = result.scalar_one()
 
@@ -403,6 +759,71 @@ async def delete_product(
         raise HTTPException(status_code=404, detail="Product not found")
 
     product.is_active = False
+    await db.commit()
+
+    if redis:
+        await cache_delete_pattern(redis, "products:*")
+
+
+async def add_product_image(
+    db: AsyncSession, redis: Redis | None, product_id: str, data
+) -> ProductOut:
+    """Add an image to the product-level gallery.
+
+    Mirrors the variation image endpoints. Without this the gallery could only
+    be set at creation time, since ProductUpdate carries no image list.
+    """
+    product = await db.scalar(select(Product).where(Product.id == product_id))
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    if data.is_featured:
+        # One hero per product gallery — demote the current one first
+        for img in product.images:
+            if img.is_featured:
+                img.is_featured = False
+        await db.flush()
+
+    db.add(
+        ProductImage(
+            product_id=product_id,
+            variation_id=None,
+            url=data.url,
+            alt=data.alt,
+            width=data.width,
+            height=data.height,
+            position=-1 if data.is_featured else data.position,
+            is_featured=data.is_featured,
+        )
+    )
+    await db.commit()
+
+    if redis:
+        await cache_delete_pattern(redis, "products:*")
+
+    result = await db.execute(
+        select(Product)
+        .options(selectinload(Product.images), selectinload(Product.category))
+        .where(Product.id == product_id)
+        .execution_options(populate_existing=True)
+    )
+    return _product_to_full_out(result.scalar_one())
+
+
+async def delete_product_image(
+    db: AsyncSession, redis: Redis | None, product_id: str, image_id: str
+) -> None:
+    image = await db.scalar(
+        select(ProductImage).where(
+            ProductImage.id == image_id,
+            ProductImage.product_id == product_id,
+            ProductImage.variation_id.is_(None),
+        )
+    )
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    await db.delete(image)
     await db.commit()
 
     if redis:

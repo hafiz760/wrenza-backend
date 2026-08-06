@@ -1,8 +1,9 @@
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.attribute import Attribute, AttributeTerm
+from app.db.models.variation import ProductAttribute, VariationAttributeValue
 from app.schemas.attribute import (
     AttributeCreate,
     AttributeOut,
@@ -76,6 +77,23 @@ async def update_attribute(
 
 async def delete_attribute(db: AsyncSession, attribute_id: str) -> None:
     attr = await _get_or_404(db, attribute_id)
+
+    # Both FKs cascade, so deleting an in-use attribute would silently strip
+    # terms off live variations. Refuse instead.
+    in_use = await db.scalar(
+        select(func.count(ProductAttribute.id)).where(
+            ProductAttribute.attribute_id == attribute_id
+        )
+    )
+    if in_use:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Attribute is used by {in_use} product(s). Remove it from them "
+                "before deleting."
+            ),
+        )
+
     await db.delete(attr)
     await db.commit()
 
@@ -127,6 +145,66 @@ async def create_term(
     return _term_to_out(term)
 
 
+async def reorder_attributes(db: AsyncSession, ids: list[str]) -> list[AttributeOut]:
+    """Set attribute order from the given sequence.
+
+    Positions come from the list index, so the result is always 0..n-1 with no
+    gaps — the ordering cannot drift out of shape however often it is changed.
+    """
+    result = await db.execute(select(Attribute).where(Attribute.id.in_(ids)))
+    found = {str(a.id): a for a in result.scalars().all()}
+
+    missing = [i for i in ids if i not in found]
+    if missing:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown attribute(s): {', '.join(missing)}"
+        )
+
+    for position, attribute_id in enumerate(ids):
+        found[attribute_id].position = position
+
+    await db.commit()
+    return await list_attributes(db)
+
+
+async def reorder_terms(
+    db: AsyncSession, attribute_id: str, ids: list[str]
+) -> list[AttributeTermOut]:
+    """Set term order within one attribute.
+
+    Ids belonging to another attribute are rejected rather than silently
+    ignored — a mismatch means the client is working from stale data.
+    """
+    await _get_or_404(db, attribute_id)
+
+    result = await db.execute(
+        select(AttributeTerm).where(
+            AttributeTerm.id.in_(ids),
+            AttributeTerm.attribute_id == attribute_id,
+        )
+    )
+    found = {str(t.id): t for t in result.scalars().all()}
+
+    missing = [i for i in ids if i not in found]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown term(s) for this attribute: {', '.join(missing)}",
+        )
+
+    for position, term_id in enumerate(ids):
+        found[term_id].position = position
+
+    await db.commit()
+
+    ordered = await db.execute(
+        select(AttributeTerm)
+        .where(AttributeTerm.attribute_id == attribute_id)
+        .order_by(AttributeTerm.position, AttributeTerm.value)
+    )
+    return [_term_to_out(t) for t in ordered.scalars().all()]
+
+
 async def update_term(
     db: AsyncSession, attribute_id: str, term_id: str, data: AttributeTermUpdate
 ) -> AttributeTermOut:
@@ -153,5 +231,20 @@ async def update_term(
 
 async def delete_term(db: AsyncSession, attribute_id: str, term_id: str) -> None:
     term = await _get_term_or_404(db, attribute_id, term_id)
+
+    in_use = await db.scalar(
+        select(func.count(VariationAttributeValue.id)).where(
+            VariationAttributeValue.term_id == term_id
+        )
+    )
+    if in_use:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Term is used by {in_use} variation(s). Delete those variations "
+                "before deleting the term."
+            ),
+        )
+
     await db.delete(term)
     await db.commit()

@@ -20,3 +20,9 @@ async def list_my_orders(user: CurrentUser, db: DbSession):
 @router.get("/{order_id}")
 async def get_order(order_id: str, user: CurrentUser, db: DbSession):
     return await order_service.get_order_detail(db, user.id, order_id)
+
+
+@router.post("/{order_id}/cancel")
+async def cancel_order(order_id: str, user: CurrentUser, db: DbSession):
+    """Cancel your own order while it is still cancellable."""
+    return await order_service.cancel_order(db, order_id, user_id=user.id)

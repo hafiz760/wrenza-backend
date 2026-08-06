@@ -44,7 +44,7 @@ async def test_place_order(client, auth_headers, admin_headers):
     )
     assert order_response.status_code == 200
     order = order_response.json()
-    assert order["orderNumber"].startswith("KK-")
+    assert order["orderNumber"].startswith("WZ-")
     assert order["status"] == "pending"
     assert order["paymentMethod"] == "Cash on Delivery"
     assert order["subtotal"] == 9000.0  # 4500 * 2

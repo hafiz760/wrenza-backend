@@ -24,7 +24,6 @@ async def test_create_and_list_product(client, admin_headers):
             "description": "Beautiful pastel rose chiffon kurta for casual wear.",
             "price": 5200,
             "compareAtPrice": 6800,
-            "fabric": "Premium Chiffon",
             "sizes": [
                 {"label": "S", "value": "s", "inStock": True},
                 {"label": "M", "value": "m", "inStock": True},
@@ -72,7 +71,6 @@ async def test_get_product_by_slug(client, admin_headers):
             "name": "Royal Blue Silk Kurta",
             "description": "Elegant royal blue silk kurta.",
             "price": 8500,
-            "fabric": "Silk",
             "stock": 15,
         },
     )
@@ -81,7 +79,6 @@ async def test_get_product_by_slug(client, admin_headers):
     assert response.status_code == 200
     data = response.json()
     assert data["name"] == "Royal Blue Silk Kurta"
-    assert data["fabric"] == "Silk"
     assert "description" in data
     assert "careInstructions" in data
 

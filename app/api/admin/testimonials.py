@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.core.deps import AdminUser, DbSession
 from app.db.models.review import Testimonial
 from app.schemas.review import TestimonialCreate
+from app.utils.casing import camelize
 
 router = APIRouter(prefix="/testimonials", tags=["Admin - Testimonials"])
 
@@ -11,7 +12,7 @@ router = APIRouter(prefix="/testimonials", tags=["Admin - Testimonials"])
 @router.get("")
 async def list_testimonials(db: DbSession, admin: AdminUser):
     result = await db.execute(select(Testimonial))
-    return [
+    return camelize([
         {
             "id": str(t.id),
             "name": t.name,
@@ -22,7 +23,7 @@ async def list_testimonials(db: DbSession, admin: AdminUser):
             "is_active": t.is_active,
         }
         for t in result.scalars().all()
-    ]
+    ])
 
 
 @router.post("")
@@ -37,7 +38,7 @@ async def create_testimonial(data: TestimonialCreate, admin: AdminUser, db: DbSe
     db.add(testimonial)
     await db.commit()
     await db.refresh(testimonial)
-    return {
+    return camelize({
         "id": str(testimonial.id),
         "name": testimonial.name,
         "location": testimonial.location,
@@ -45,7 +46,7 @@ async def create_testimonial(data: TestimonialCreate, admin: AdminUser, db: DbSe
         "comment": testimonial.comment,
         "rating": testimonial.rating,
         "is_active": testimonial.is_active,
-    }
+    })
 
 
 @router.put("/{testimonial_id}")
@@ -59,7 +60,7 @@ async def update_testimonial(testimonial_id: str, data: TestimonialCreate, admin
 
     await db.commit()
     await db.refresh(testimonial)
-    return {
+    return camelize({
         "id": str(testimonial.id),
         "name": testimonial.name,
         "location": testimonial.location,
@@ -67,7 +68,7 @@ async def update_testimonial(testimonial_id: str, data: TestimonialCreate, admin
         "comment": testimonial.comment,
         "rating": testimonial.rating,
         "is_active": testimonial.is_active,
-    }
+    })
 
 
 @router.delete("/{testimonial_id}")

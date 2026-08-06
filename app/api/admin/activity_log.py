@@ -4,6 +4,7 @@ from sqlalchemy import select, desc
 from app.core.deps import AdminUser, DbSession
 from app.db.models.activity_log import ActivityLog
 from app.utils.pagination import paginate
+from app.utils.casing import camelize
 
 router = APIRouter(prefix="/activity-log", tags=["Admin - Activity Log"])
 
@@ -35,4 +36,4 @@ async def list_activity_logs(
         }
         for log in result["items"]
     ]
-    return result
+    return camelize(result)

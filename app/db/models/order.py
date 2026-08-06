@@ -63,10 +63,13 @@ class OrderItem(Base, UUIDMixin):
         ForeignKey("products.id", ondelete="SET NULL"),
         nullable=True,
     )
+    variation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("product_variations.id", ondelete="SET NULL"), nullable=True
+    )
+    # Carries the chosen attributes, so a deleted variation does not make the
+    # order unreadable
     product_snapshot: Mapped[dict] = mapped_column(JSON)
     quantity: Mapped[int] = mapped_column(Integer)
-    size: Mapped[str] = mapped_column(String(10))
-    color: Mapped[str] = mapped_column(String(50))
     unit_price: Mapped[float] = mapped_column(Numeric(10, 2))
 
     # Relationships

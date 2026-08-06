@@ -43,6 +43,7 @@ class BannerOut(CamelModel):
     id: str
     title: str
     image_url: str
+    video_url: str | None = None
     link: str | None = None
     position: int
     active_from: date | None = None
@@ -52,7 +53,10 @@ class BannerOut(CamelModel):
 
 class BannerCreate(CamelModel):
     title: Annotated[str, Field(min_length=1, max_length=255)]
-    image_url: Annotated[str, Field(min_length=1, max_length=500)]
+    image_url: Annotated[str, Field(min_length=1, max_length=500)] = Field(
+        description="The image, or the poster frame when videoUrl is set."
+    )
+    video_url: Annotated[str, Field(min_length=1, max_length=500)] | None = None
     link: Annotated[str, Field(min_length=1, max_length=500)] | None = None
     position: Annotated[int, Field(ge=0)] = 0
     active_from: date | None = None
@@ -69,6 +73,7 @@ class BannerCreate(CamelModel):
 class BannerUpdate(CamelModel):
     title: Annotated[str, Field(min_length=1, max_length=255)] | None = None
     image_url: Annotated[str, Field(min_length=1, max_length=500)] | None = None
+    video_url: Annotated[str, Field(min_length=1, max_length=500)] | None = None
     link: Annotated[str, Field(min_length=1, max_length=500)] | None = None
     position: Annotated[int, Field(ge=0)] | None = None
     active_from: date | None = None

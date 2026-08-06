@@ -27,7 +27,10 @@ class Banner(Base, UUIDMixin):
     __tablename__ = "banners"
 
     title: Mapped[str] = mapped_column(String(255))
+    # Always set: the image itself, or the poster frame for a video banner.
+    # Mobile browsers block autoplay and show this instead.
     image_url: Mapped[str] = mapped_column(String(500))
+    video_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     link: Mapped[str | None] = mapped_column(String(500), nullable=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     active_from: Mapped[date | None] = mapped_column(Date, nullable=True)

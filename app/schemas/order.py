@@ -13,8 +13,10 @@ from app.schemas.user import AddressOut
 class CheckoutItemCreate(CamelModel):
     product_id: Annotated[str, Field(min_length=1, max_length=36)]
     quantity: Annotated[int, Field(ge=1)]
-    size: Annotated[str, Field(min_length=1, max_length=10)]
-    color: Annotated[str, Field(min_length=1, max_length=50)]
+    variation_id: Annotated[str, Field(min_length=1, max_length=36)] | None = Field(
+        default=None,
+        description="Required for variable products; omit for simple products.",
+    )
 
     @field_validator("quantity")
     @classmethod
@@ -49,8 +51,10 @@ class CheckoutRequest(CamelModel):
 class OrderItemCreate(CamelModel):
     product_id: Annotated[str, Field(min_length=1, max_length=36)]
     quantity: Annotated[int, Field(ge=1)]
-    size: Annotated[str, Field(min_length=1, max_length=10)]
-    color: Annotated[str, Field(min_length=1, max_length=50)]
+    variation_id: Annotated[str, Field(min_length=1, max_length=36)] | None = Field(
+        default=None,
+        description="Required for variable products; omit for simple products.",
+    )
 
     @field_validator("quantity")
     @classmethod
@@ -87,13 +91,16 @@ class AddressInline(CamelModel):
 class OrderItemOut(CamelModel):
     product: dict
     quantity: int
-    size: str
-    color: str
 
 
 class OrderOut(CamelModel):
     id: str
     order_number: str
+    # Who placed it — set for guest checkout, and mirrored for account orders
+    customer_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    notes: str | None = None
     items: list[OrderItemOut] = Field(default_factory=list)
     status: str
     subtotal: float

@@ -1,3 +1,4 @@
+from math import ceil
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -8,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.product import Product
 from app.db.models.review import Review
 from app.db.models.user import User
-from app.schemas.review import ReviewCreate
+from app.schemas.review import (
+    ProductReviewsOut,
+    ReviewCreate,
+    ReviewOut,
+    ReviewSummary,
+)
 from app.utils.cache import cache_delete_pattern
 
 
@@ -76,6 +82,73 @@ async def create_review(db: AsyncSession, user_id: UUID, data: ReviewCreate, red
 
     user = await db.scalar(select(User).where(User.id == user_id))
     return _review_to_out(review, user)
+
+
+async def list_public_reviews(
+    db: AsyncSession, slug: str, page: int = 1, page_size: int = 10
+) -> ProductReviewsOut:
+    """Approved reviews for a product, newest first, with a rating histogram.
+
+    Keyed by slug because that is what the storefront has in the URL; looking
+    the product up here saves the client a round-trip.
+    """
+    product = await db.scalar(
+        select(Product).where(Product.slug == slug, Product.is_active.is_(True))
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    approved = (
+        Review.product_id == product.id,
+        Review.is_approved.is_(True),
+    )
+
+    # One grouped query for the histogram, rather than five counts
+    buckets = await db.execute(
+        select(Review.rating, func.count(Review.id)).where(*approved).group_by(
+            Review.rating
+        )
+    )
+    distribution = {str(star): 0 for star in range(1, 6)}
+    total = 0
+    weighted = 0
+    for rating, count in buckets.all():
+        distribution[str(rating)] = count
+        total += count
+        weighted += rating * count
+
+    offset = (page - 1) * page_size
+    rows = await db.execute(
+        select(Review, User)
+        .join(User, Review.user_id == User.id)
+        .where(*approved)
+        .order_by(desc(Review.created_at))
+        .offset(offset)
+        .limit(page_size)
+    )
+
+    return ProductReviewsOut(
+        items=[
+            ReviewOut(
+                id=str(r.id),
+                user_id=str(r.user_id),
+                user_name=f"{u.first_name} {u.last_name}".strip(),
+                rating=r.rating,
+                comment=r.comment,
+                created_at=r.created_at,
+            )
+            for r, u in rows.all()
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=ceil(total / page_size) if page_size > 0 else 0,
+        summary=ReviewSummary(
+            average=round(weighted / total, 2) if total else 0.0,
+            total=total,
+            distribution=distribution,
+        ),
+    )
 
 
 async def list_reviews_for_product(

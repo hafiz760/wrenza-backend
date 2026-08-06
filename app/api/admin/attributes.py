@@ -8,6 +8,7 @@ from app.schemas.attribute import (
     AttributeTermOut,
     AttributeTermUpdate,
     AttributeUpdate,
+    ReorderRequest,
 )
 from app.schemas.common import MessageResponse
 from app.services import attribute_service
@@ -18,6 +19,15 @@ router = APIRouter(prefix="/attributes", tags=["Admin - Attributes"])
 @router.get("", response_model=list[AttributeOut])
 async def list_attributes(db: DbSession, admin: AdminUser):
     return await attribute_service.list_attributes(db)
+
+
+@router.patch("/reorder", response_model=list[AttributeOut])
+async def reorder_attributes(data: ReorderRequest, admin: AdminUser, db: DbSession):
+    """Set the order attributes appear in, from a list of ids.
+
+    Declared before `/{attribute_id}` so "reorder" is not read as an id.
+    """
+    return await attribute_service.reorder_attributes(db, data.ids)
 
 
 @router.post("", response_model=AttributeOut)
@@ -43,6 +53,16 @@ async def create_term(
     attribute_id: str, data: AttributeTermCreate, admin: AdminUser, db: DbSession
 ):
     return await attribute_service.create_term(db, attribute_id, data)
+
+
+@router.patch(
+    "/{attribute_id}/terms/reorder", response_model=list[AttributeTermOut]
+)
+async def reorder_terms(
+    attribute_id: str, data: ReorderRequest, admin: AdminUser, db: DbSession
+):
+    """Set the order terms appear in within one attribute."""
+    return await attribute_service.reorder_terms(db, attribute_id, data.ids)
 
 
 @router.put("/{attribute_id}/terms/{term_id}", response_model=AttributeTermOut)

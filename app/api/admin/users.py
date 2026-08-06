@@ -6,6 +6,7 @@ from app.core.deps import AdminUser, DbSession
 from app.db.models.user import User
 from app.schemas.user import AdminUserUpdate
 from app.utils.pagination import paginate
+from app.utils.casing import camelize
 
 router = APIRouter(prefix="/users", tags=["Admin - Users"])
 
@@ -41,7 +42,7 @@ async def list_users(
         }
         for u in result["items"]
     ]
-    return result
+    return camelize(result)
 
 
 @router.put("/{user_id}")
@@ -57,7 +58,7 @@ async def update_user(user_id: str, data: AdminUserUpdate, admin: AdminUser, db:
     await db.commit()
     await db.refresh(user)
 
-    return {
+    return camelize({
         "id": str(user.id),
         "email": user.email,
         "first_name": user.first_name,
@@ -66,4 +67,4 @@ async def update_user(user_id: str, data: AdminUserUpdate, admin: AdminUser, db:
         "role": user.role.value if hasattr(user.role, "value") else user.role,
         "is_active": user.is_active,
         "created_at": user.created_at.isoformat() if user.created_at else None,
-    }
+    })

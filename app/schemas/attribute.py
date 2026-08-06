@@ -58,3 +58,13 @@ class AttributeTermUpdate(CamelModel):
     ) = None
     meta: dict | None = None
     position: Annotated[int, Field(ge=0)] | None = None
+
+
+class ReorderRequest(CamelModel):
+    """Full ordering, sent as a list of ids in the order they should appear.
+
+    Positions are assigned from the list index rather than supplied by the
+    caller, so the sequence can never end up with gaps or duplicates.
+    """
+
+    ids: Annotated[list[str], Field(min_length=1)]

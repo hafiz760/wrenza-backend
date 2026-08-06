@@ -6,6 +6,14 @@ from app.db.models.promotion import Discount, Banner
 from app.db.models.wishlist import Wishlist
 from app.db.models.contact import ContactSubmission, NewsletterSubscriber
 from app.db.models.activity_log import ActivityLog
+from app.db.models.settings import StoreSettings
+from app.db.models.faq import ProductFaq
+from app.db.models.variation import (
+    ProductAttribute,
+    ProductAttributeTerm,
+    ProductVariation,
+    VariationAttributeValue,
+)
 from app.db.models.attribute import Attribute, AttributeTerm
 
 __all__ = [
@@ -27,4 +35,10 @@ __all__ = [
     "ActivityLog",
     "Attribute",
     "AttributeTerm",
+    "ProductAttribute",
+    "ProductAttributeTerm",
+    "ProductVariation",
+    "VariationAttributeValue",
+    "StoreSettings",
+    "ProductFaq",
 ]

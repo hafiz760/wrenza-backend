@@ -3,12 +3,14 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models.order import Order, OrderItem, OrderStatus
+from app.db.models.attribute import AttributeTerm
 from app.db.models.product import Product
+from app.db.models.variation import ProductVariation, VariationAttributeValue
 from app.db.models.user import Address
 from app.services.product_service import _product_to_list_out
 from app.schemas.order import (
@@ -29,15 +31,20 @@ def _order_to_out(order: Order) -> OrderOut:
         OrderItemOut(
             product=item.product_snapshot,
             quantity=item.quantity,
-            size=item.size,
-            color=item.color,
         )
         for item in order.items
     ]
 
+    name_parts = [order.guest_first_name, order.guest_last_name]
+    customer_name = " ".join(p for p in name_parts if p) or None
+
     return OrderOut(
         id=str(order.id),
         order_number=order.order_number,
+        customer_name=customer_name,
+        email=order.email,
+        phone=order.phone,
+        notes=order.notes,
         items=items,
         status=order.status,
         subtotal=float(order.subtotal),
@@ -52,12 +59,106 @@ def _order_to_out(order: Order) -> OrderOut:
     )
 
 
+async def _reserve_line_item(db: AsyncSession, item_data) -> tuple[dict, Decimal]:
+    """Validate one checkout line, reserve its stock, and build its snapshot.
+
+    Single source of truth for both the guest checkout and the authenticated
+    order path — they previously carried identical copies of this logic, which
+    is how the two drifted apart in the first place.
+
+    Stock is taken from the variation for variable products and from the product
+    itself for simple ones.
+    """
+    result = await db.execute(
+        select(Product)
+        .options(selectinload(Product.images), selectinload(Product.category))
+        .where(Product.id == item_data.product_id, Product.is_active.is_(True))
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(
+            status_code=400, detail=f"Product {item_data.product_id} not found"
+        )
+
+    variation_id = getattr(item_data, "variation_id", None)
+
+    if product.kind == "variable":
+        if not variation_id:
+            raise HTTPException(
+                status_code=422,
+                detail=f"'{product.name}' is a variable product — variationId is required.",
+            )
+        variation = await db.scalar(
+            select(ProductVariation).where(
+                ProductVariation.id == variation_id,
+                ProductVariation.product_id == product.id,
+            )
+        )
+        if not variation:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Variation {variation_id} does not belong to '{product.name}'.",
+            )
+        if not variation.is_active:
+            raise HTTPException(
+                status_code=422, detail=f"That option of '{product.name}' is unavailable."
+            )
+        stock_holder = variation
+        unit_price = Decimal(str(variation.price))
+    else:
+        if variation_id:
+            raise HTTPException(
+                status_code=422,
+                detail=f"'{product.name}' is a simple product — do not send variationId.",
+            )
+        stock_holder = product
+        unit_price = Decimal(str(product.price))
+
+    if stock_holder.stock < item_data.quantity:
+        raise HTTPException(
+            status_code=400, detail=f"Insufficient stock for {product.name}"
+        )
+
+    # by_alias so the snapshot is camelCase like every other payload. It is
+    # stored as an opaque dict, so nothing downstream would convert it later.
+    snapshot = _product_to_list_out(product).model_dump(by_alias=True)
+    if product.kind == "variable":
+        terms = await db.execute(
+            select(AttributeTerm)
+            .join(
+                VariationAttributeValue,
+                VariationAttributeValue.term_id == AttributeTerm.id,
+            )
+            .options(selectinload(AttributeTerm.attribute))
+            .where(VariationAttributeValue.variation_id == stock_holder.id)
+        )
+        # Recorded on the order so it stays readable after the variation is gone
+        snapshot["variation"] = {
+            "id": str(stock_holder.id),
+            "sku": stock_holder.sku,
+            "attributes": {t.attribute.name: t.value for t in terms.scalars().all()},
+        }
+
+    stock_holder.stock -= item_data.quantity
+
+    return (
+        {
+            "product_id": product.id,
+            "variation_id": variation_id,
+            "product_snapshot": snapshot,
+            "quantity": item_data.quantity,
+            "unit_price": float(unit_price),
+        },
+        unit_price * item_data.quantity,
+    )
+
+
 async def _generate_order_number(db: AsyncSession) -> str:
     year = datetime.now(timezone.utc).year
     count = await db.scalar(
-        select(func.count(Order.id)).where(Order.order_number.like(f"KK-{year}-%"))
+        select(func.count(Order.id)).where(Order.order_number.like(f"WZ-{year}-%"))
     )
-    return f"KK-{year}-{(count or 0) + 1:03d}"
+    return f"WZ-{year}-{(count or 0) + 1:03d}"
 
 
 async def create_order(db: AsyncSession, user_id: str, data: OrderCreate) -> OrderOut:
@@ -99,44 +200,9 @@ async def create_order(db: AsyncSession, user_id: str, data: OrderCreate) -> Ord
     order_items = []
 
     for item_data in data.items:
-        result = await db.execute(
-            select(Product)
-            .options(selectinload(Product.images), selectinload(Product.category))
-            .where(Product.id == item_data.product_id, Product.is_active.is_(True))
-        )
-        product = result.scalar_one_or_none()
-
-        if not product:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Product {item_data.product_id} not found",
-            )
-
-        if product.stock < item_data.quantity:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient stock for {product.name}",
-            )
-
-        unit_price = Decimal(str(product.price))
-        subtotal += unit_price * item_data.quantity
-
-        # Create product snapshot for order history
-        snapshot = _product_to_list_out(product).model_dump()
-
-        order_items.append(
-            {
-                "product_id": product.id,
-                "product_snapshot": snapshot,
-                "quantity": item_data.quantity,
-                "size": item_data.size,
-                "color": item_data.color,
-                "unit_price": float(unit_price),
-            }
-        )
-
-        # Deduct stock
-        product.stock -= item_data.quantity
+        line, line_total = await _reserve_line_item(db, item_data)
+        order_items.append(line)
+        subtotal += line_total
 
     # Calculate shipping
     shipping = (
@@ -185,10 +251,9 @@ async def create_order(db: AsyncSession, user_id: str, data: OrderCreate) -> Ord
             OrderItem(
                 order_id=order.id,
                 product_id=item["product_id"],
+                variation_id=item["variation_id"],
                 product_snapshot=item["product_snapshot"],
                 quantity=item["quantity"],
-                size=item["size"],
-                color=item["color"],
                 unit_price=item["unit_price"],
             )
         )
@@ -215,43 +280,9 @@ async def create_checkout_order(
     order_items = []
 
     for item_data in data.items:
-        result = await db.execute(
-            select(Product)
-            .options(selectinload(Product.images), selectinload(Product.category))
-            .where(Product.id == item_data.product_id, Product.is_active.is_(True))
-        )
-        product = result.scalar_one_or_none()
-
-        if not product:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Product {item_data.product_id} not found",
-            )
-
-        if product.stock < item_data.quantity:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient stock for {product.name}",
-            )
-
-        unit_price = Decimal(str(product.price))
-        subtotal += unit_price * item_data.quantity
-
-        snapshot = _product_to_list_out(product).model_dump()
-
-        order_items.append(
-            {
-                "product_id": product.id,
-                "product_snapshot": snapshot,
-                "quantity": item_data.quantity,
-                "size": item_data.size,
-                "color": item_data.color,
-                "unit_price": float(unit_price),
-            }
-        )
-
-        # Deduct stock
-        product.stock -= item_data.quantity
+        line, line_total = await _reserve_line_item(db, item_data)
+        order_items.append(line)
+        subtotal += line_total
 
     # Calculate shipping
     shipping = (
@@ -311,10 +342,9 @@ async def create_checkout_order(
             OrderItem(
                 order_id=order.id,
                 product_id=item["product_id"],
+                variation_id=item["variation_id"],
                 product_snapshot=item["product_snapshot"],
                 quantity=item["quantity"],
-                size=item["size"],
-                color=item["color"],
                 unit_price=item["unit_price"],
             )
         )
@@ -363,6 +393,29 @@ VALID_TRANSITIONS = {
 }
 
 
+async def _restore_stock(db: AsyncSession, order: Order) -> None:
+    """Return a cancelled order's units to whatever they were taken from.
+
+    Without this, cancelling destroys inventory permanently — the stock was
+    deducted at checkout and nothing ever gave it back.
+    """
+    for item in order.items:
+        if item.variation_id:
+            holder = await db.scalar(
+                select(ProductVariation).where(
+                    ProductVariation.id == item.variation_id
+                )
+            )
+        else:
+            holder = await db.scalar(
+                select(Product).where(Product.id == item.product_id)
+            )
+        # The product or variation may have been deleted since the order was
+        # placed; there is simply nothing to restore in that case.
+        if holder is not None:
+            holder.stock += item.quantity
+
+
 async def update_order_status(
     db: AsyncSession, order_id: str, data: OrderStatusUpdate
 ) -> OrderOut:
@@ -382,11 +435,58 @@ async def update_order_status(
             detail=f"Cannot transition from {current_status.value} to {new_status.value}",
         )
 
+    if new_status == OrderStatus.CANCELLED:
+        await _restore_stock(db, order)
+
     order.status = new_status.value
     if data.tracking_number:
         order.tracking_number = data.tracking_number
 
     await db.commit()
+    # `updated_at` carries onupdate=func.now(), so it is server-generated and
+    # expired by the UPDATE; reading it without refreshing lazy-loads outside
+    # the async greenlet.
+    await db.refresh(order)
+    return _order_to_out(order)
+
+
+async def cancel_order(
+    db: AsyncSession, order_id: str, user_id: str | None = None
+) -> OrderOut:
+    """Cancel an order and return its stock.
+
+    `user_id` scopes the lookup for the customer-facing route; admins pass None.
+    """
+    query = select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
+    if user_id is not None:
+        query = query.where(Order.user_id == user_id)
+
+    order = (await db.execute(query)).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    current_status = OrderStatus(order.status)
+    if OrderStatus.CANCELLED not in VALID_TRANSITIONS.get(current_status, []):
+        raise HTTPException(
+            status_code=400,
+            detail=f"An order that is already {current_status.value} cannot be cancelled.",
+        )
+
+    await _restore_stock(db, order)
+    order.status = OrderStatus.CANCELLED.value
+    await db.commit()
+    await db.refresh(order)
+    return _order_to_out(order)
+
+
+async def get_order_admin(db: AsyncSession, order_id: str) -> OrderOut:
+    """Single order for admin — unlike get_order_detail, not scoped to a user."""
+    result = await db.execute(
+        select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
     return _order_to_out(order)
 
 
@@ -395,6 +495,9 @@ async def get_all_orders(
     page: int = 1,
     page_size: int = 20,
     status_filter: str | None = None,
+    search: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> PaginatedResponse[OrderOut]:
     from app.utils.pagination import paginate
 
@@ -406,6 +509,21 @@ async def get_all_orders(
 
     if status_filter:
         query = query.where(Order.status == status_filter)
+    if search:
+        term = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Order.order_number.ilike(term),
+                Order.email.ilike(term),
+                Order.phone.ilike(term),
+                Order.guest_first_name.ilike(term),
+                Order.guest_last_name.ilike(term),
+            )
+        )
+    if date_from:
+        query = query.where(Order.created_at >= date_from)
+    if date_to:
+        query = query.where(Order.created_at <= date_to)
 
     result = await paginate(query, page, page_size, db)
     items = [_order_to_out(o) for o in result["items"]]

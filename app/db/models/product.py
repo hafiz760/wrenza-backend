@@ -20,12 +20,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin, UUIDMixin
 
 
-class GenderType(str, enum.Enum):
-    MALE = "male"
-    FEMALE = "female"
-    UNISEX = "unisex"
-
-
 class Category(Base, UUIDMixin):
     __tablename__ = "categories"
 
@@ -67,7 +61,12 @@ class Product(Base, UUIDMixin, TimestampMixin):
 
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
+    # Both authored in TipTap and stored as sanitised HTML
+    short_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str] = mapped_column(Text)
+    # "simple" | "variable". Distinct from product_type (wallet/bag/belt).
+    # For variable products price and stock below are derived, not authoritative.
+    kind: Mapped[str] = mapped_column(String(20), default="simple", index=True)
     price: Mapped[float] = mapped_column(Numeric(10, 2))
     compare_at_price: Mapped[float | None] = mapped_column(
         Numeric(10, 2), nullable=True
@@ -80,16 +79,7 @@ class Product(Base, UUIDMixin, TimestampMixin):
     product_type: Mapped[str | None] = mapped_column(
         String(30), nullable=True, index=True
     )
-    material: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    leather_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     dimensions: Mapped[dict] = mapped_column(JSON, default=dict)
-    hardware_finish: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    closure_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    fabric: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    gender: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    # Stored as JSON to match frontend's ProductSize[] and ProductColor[]
-    sizes: Mapped[list] = mapped_column(JSON, default=list)
-    colors: Mapped[list] = mapped_column(JSON, default=list)
     care_instructions: Mapped[list] = mapped_column(JSON, default=list)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     stock: Mapped[int] = mapped_column(Integer, default=0)
@@ -98,50 +88,97 @@ class Product(Base, UUIDMixin, TimestampMixin):
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
     is_new_arrival: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Stock-keeping unit. Variations carry their own; this covers simple
+    # products and is what Product schema's `sku` reports.
+    sku: Mapped[str | None] = mapped_column(
+        String(100), unique=True, nullable=True, index=True
+    )
     meta_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     meta_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Points duplicates at the original; empty means the product's own URL
+    canonical_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Social share card; falls back to the feature image when unset
+    og_image: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationships (string refs to avoid circular imports)
     category: Mapped["Category | None"] = relationship(
         back_populates="products", lazy="selectin"
     )
+    # Product-level gallery only — variation images are reached via
+    # ProductVariation.images, not here.
     images: Mapped[list["ProductImage"]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
         lazy="selectin",
         order_by="ProductImage.position",
+        primaryjoin=(
+            "and_(Product.id == ProductImage.product_id, "
+            "ProductImage.variation_id.is_(None))"
+        ),
     )
     reviews: Mapped[list["Review"]] = relationship(
         back_populates="product", lazy="noload"
+    )
+    variations: Mapped[list["ProductVariation"]] = relationship(
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ProductVariation.position",
+    )
+    attributes: Mapped[list["ProductAttribute"]] = relationship(
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ProductAttribute.position",
+    )
+    faqs: Mapped[list["ProductFaq"]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ProductFaq.position",
     )
 
 
 class ProductImage(Base, UUIDMixin):
     __tablename__ = "product_images"
     __table_args__ = (
-        # At most one feature image per product
+        # Two indexes, not one: Postgres treats NULLs as distinct, so a single
+        # index over (product_id, variation_id) would allow many featured
+        # product-level images.
         Index(
             "uq_product_images_featured",
             "product_id",
             unique=True,
-            postgresql_where=text("is_featured"),
-            sqlite_where=text("is_featured"),
+            postgresql_where=text("is_featured AND variation_id IS NULL"),
+            sqlite_where=text("is_featured AND variation_id IS NULL"),
+        ),
+        Index(
+            "uq_variation_images_featured",
+            "variation_id",
+            unique=True,
+            postgresql_where=text("is_featured AND variation_id IS NOT NULL"),
+            sqlite_where=text("is_featured AND variation_id IS NOT NULL"),
         ),
     )
 
     product_id: Mapped[str] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE")
     )
+    # NULL = product-level gallery; set = belongs to that variation
+    variation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("product_variations.id", ondelete="CASCADE"), nullable=True
+    )
     url: Mapped[str] = mapped_column(String(500))
     alt: Mapped[str] = mapped_column(String(255), default="")
     width: Mapped[int] = mapped_column(Integer, default=0)
     height: Mapped[int] = mapped_column(Integer, default=0)
     position: Mapped[int] = mapped_column(Integer, default=0)
-    # Marks the hero image; excluded from the gallery in API responses
+    # Hero image within its own scope (product gallery, or variation gallery)
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Relationships
     product: Mapped["Product"] = relationship(back_populates="images")
+    variation: Mapped["ProductVariation | None"] = relationship(
+        back_populates="images"
+    )
 
 
 class Collection(Base, UUIDMixin):

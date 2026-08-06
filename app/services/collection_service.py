@@ -5,10 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.product import Collection
 from app.schemas.collection import CollectionCreate, CollectionUpdate
 from app.utils.slug import ensure_unique_slug, generate_slug
+from app.utils.casing import camelize
 
 
 def _collection_to_out(c: Collection) -> dict:
-    return {
+    return camelize({
         "id": str(c.id),
         "slug": c.slug,
         "name": c.name,
@@ -20,7 +21,7 @@ def _collection_to_out(c: Collection) -> dict:
         "year": c.year,
         "is_featured": c.is_featured,
         "created_at": c.created_at.isoformat() if c.created_at else None,
-    }
+    })
 
 
 async def list_collections(db: AsyncSession) -> list[dict]:
