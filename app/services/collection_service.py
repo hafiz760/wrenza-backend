@@ -8,8 +8,8 @@ from app.utils.slug import ensure_unique_slug, generate_slug
 from app.utils.casing import camelize
 
 
-def _collection_to_out(c: Collection) -> dict:
-    return camelize({
+def _collection_to_out(c: Collection, *, include_status: bool = False) -> dict:
+    data = {
         "id": str(c.id),
         "slug": c.slug,
         "name": c.name,
@@ -21,7 +21,13 @@ def _collection_to_out(c: Collection) -> dict:
         "year": c.year,
         "is_featured": c.is_featured,
         "created_at": c.created_at.isoformat() if c.created_at else None,
-    })
+    }
+    # The public listing only ever returns active collections, so the flag
+    # would always be true there. The admin needs it to render the status and
+    # to know what the toggle currently says.
+    if include_status:
+        data["is_active"] = c.is_active
+    return camelize(data)
 
 
 async def list_collections(db: AsyncSession) -> list[dict]:
@@ -31,6 +37,21 @@ async def list_collections(db: AsyncSession) -> list[dict]:
         .order_by(desc(Collection.created_at))
     )
     return [_collection_to_out(c) for c in result.scalars().all()]
+
+
+async def list_collections_admin(db: AsyncSession) -> list[dict]:
+    """Every collection, active or not.
+
+    The admin list must not reuse the public one. Deactivating a collection
+    would drop it from the only screen that can reactivate it, leaving no way
+    back through the dashboard.
+    """
+    result = await db.execute(
+        select(Collection).order_by(desc(Collection.created_at))
+    )
+    return [
+        _collection_to_out(c, include_status=True) for c in result.scalars().all()
+    ]
 
 
 async def get_by_slug(db: AsyncSession, slug: str) -> dict:
@@ -60,7 +81,8 @@ async def create_collection(db: AsyncSession, data: CollectionCreate) -> dict:
     db.add(collection)
     await db.commit()
     await db.refresh(collection)
-    return _collection_to_out(collection)
+    # Admin-only response — the dashboard renders status straight from this
+    return _collection_to_out(collection, include_status=True)
 
 
 async def update_collection(db: AsyncSession, collection_id: str, data: CollectionUpdate) -> dict:
@@ -81,7 +103,7 @@ async def update_collection(db: AsyncSession, collection_id: str, data: Collecti
 
     await db.commit()
     await db.refresh(collection)
-    return _collection_to_out(collection)
+    return _collection_to_out(collection, include_status=True)
 
 
 async def delete_collection(db: AsyncSession, collection_id: str) -> None:

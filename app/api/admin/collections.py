@@ -9,7 +9,9 @@ router = APIRouter(prefix="/collections", tags=["Admin - Collections"])
 
 @router.get("")
 async def list_collections(db: DbSession, admin: AdminUser):
-    return await collection_service.list_collections(db)
+    # Not the public listing — that one hides inactive collections, which would
+    # make deactivating one a permanent, unreachable state.
+    return await collection_service.list_collections_admin(db)
 
 
 @router.post("")
