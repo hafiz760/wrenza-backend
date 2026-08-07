@@ -25,7 +25,7 @@ def _upload_sync(contents: bytes, folder: str) -> dict:
     _configure_cloudinary()
     return cloudinary.uploader.upload(
         contents,
-        folder=f"kurta-kameez/{folder}",
+        folder=f"wrenza/{folder}",
         resource_type="image",
         transformation=[
             {"quality": "auto", "fetch_format": "auto"},

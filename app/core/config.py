@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = (
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/kurta_kameez"
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/wrenza-db"
     )
     DATABASE_SSL: bool = False
 

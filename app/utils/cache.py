@@ -3,7 +3,8 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-CACHE_PREFIX = "kk"
+# Namespaces every key, so this Redis can be shared with other apps
+CACHE_PREFIX = "wz"
 DEFAULT_TTL = 300  # 5 minutes
 TTL_SHORT = 300    # 5 min — product lists (filtered, paginated)
 TTL_MEDIUM = 1800  # 30 min — featured, new arrivals, categories
@@ -11,7 +12,7 @@ TTL_LONG = 7200    # 2 hours — product detail (rarely changes)
 
 
 def cache_key(*parts: str) -> str:
-    """Build a namespaced cache key: kk:products:list:page1."""
+    """Build a namespaced cache key: wz:products:list:page1."""
     return f"{CACHE_PREFIX}:{':'.join(parts)}"
 
 
@@ -29,7 +30,7 @@ async def cache_set(redis: Redis, key: str, data: Any, ttl: int = DEFAULT_TTL) -
 
 
 async def cache_delete_pattern(redis: Redis, pattern: str) -> None:
-    """Delete all keys matching a pattern (e.g., kk:products:*)."""
+    """Delete all keys matching a pattern (e.g., wz:products:*)."""
     full_pattern = f"{CACHE_PREFIX}:{pattern}"
     cursor = 0
     while True:
