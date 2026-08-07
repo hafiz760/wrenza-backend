@@ -1,0 +1,105 @@
+# Development stack.
+#
+#   docker compose up
+#
+# Brings up Postgres, Redis, the API and the arq worker. Source is mounted, so
+# edits reload without a rebuild. The dashboard and storefront still run on
+# your machine with `pnpm dev` — Next reloads far faster outside a container.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: wrenza-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: wrenza-db
+    ports:
+      # 5434 on the host. Two Postgres instances already run here, on 5432 and
+      # 5433 — this container is a third, separate database with its own data.
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d wrenza-db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    container_name: wrenza-redis
+    # Persist the queue: a restart with jobs still waiting should not drop
+    # the order confirmations that had not been sent yet.
+    command: redis-server --appendonly yes
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      target: dev
+    container_name: wrenza-api
+    env_file: .env
+    environment:
+      # Service names, not localhost — inside the network each container is
+      # reachable by the name compose gives it.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/wrenza-db
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_HOST: postgres
+    ports:
+      - "8000:8000"
+    volumes:
+      # Source mounted for reload. The venv is masked by an anonymous volume
+      # so the container keeps its own Linux-built packages rather than
+      # inheriting the host's.
+      - .:/app
+      - /app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: dev
+    container_name: wrenza-worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/wrenza-db
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_HOST: postgres
+      # The API already migrated and seeded. Two containers doing either at
+      # once would race on the same lock and the same insert.
+      RUN_MIGRATIONS: "0"
+      SEED_ADMIN: "0"
+    command: ["python", "-m", "app.tasks.run_worker"]
+    volumes:
+      - .:/app
+      - /app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # Ordering only, not readiness — but it means migrations have at least
+      # started before the worker begins looking for jobs.
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,22 @@
+# Keep the build context small and secrets out of the image.
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Never copied in — compose injects configuration as environment variables.
+.env
+.env.*
+!.env.example
+
+.git/
+.gitignore
+*.md
+!README.md
+
+tests/
+docker-compose*.yml
+Dockerfile

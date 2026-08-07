@@ -1,0 +1,94 @@
+# Production stack.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Differences from development that matter: code is baked into the image
+# rather than mounted, uvicorn runs several workers with no reload, ports are
+# bound to localhost so a reverse proxy fronts them, and nothing restarts into
+# a crash loop unnoticed.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: wrenza-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-wrenza-db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # No published port. Only the API and worker need the database, and they
+    # reach it over the compose network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  redis:
+    image: redis:8-alpine
+    container_name: wrenza-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+
+  api:
+    build:
+      context: .
+      target: prod
+    container_name: wrenza-api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wrenza-db}
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_HOST: postgres
+      DEBUG: "false"
+    ports:
+      # Bound to loopback: nginx or Caddy terminates TLS and proxies here.
+      # Exposing 8000 publicly would serve the API over plain HTTP.
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ping')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: always
+
+  worker:
+    build:
+      context: .
+      target: prod
+    container_name: wrenza-worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wrenza-db}
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_HOST: postgres
+      RUN_MIGRATIONS: "0"
+      SEED_ADMIN: "0"
+    command: ["python", "-m", "app.tasks.run_worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: always
+
+volumes:
+  postgres_data:
+  redis_data:
