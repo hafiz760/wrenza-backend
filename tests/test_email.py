@@ -7,8 +7,20 @@ checkout would produce.
 
 import pytest
 
+from app.core.config import get_settings
 from app.services.email import sender as email_sender
 from app.tasks import email_tasks
+
+
+@pytest.fixture(autouse=True)
+def shop_address(monkeypatch):
+    """Pin ADMIN_EMAIL so these tests do not read the developer's .env.
+
+    Both shop-facing emails are skipped when it is unset, and it defaults to
+    "". That made the suite pass on a machine whose .env happened to define it
+    and fail anywhere else — CI found this, not a local run.
+    """
+    monkeypatch.setattr(get_settings(), "ADMIN_EMAIL", "shop@wrenza.test")
 
 
 @pytest.fixture
