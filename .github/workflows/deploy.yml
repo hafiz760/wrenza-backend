@@ -1,0 +1,99 @@
+# Test on every push, deploy master to api.wrenza.com.
+#
+# Deployment is an SSH into the server that runs the same three commands you
+# would run by hand: pull, rebuild, verify. Nothing is built on the runner, so
+# there is no image registry involved and no ghcr.io credential to collide with
+# the one this shared server already carries for another developer.
+
+name: Deploy
+
+on:
+  push:
+    # staging gets tests but never deploys — see the `if` on the deploy job.
+    # Work lands on staging, opens a PR into master, and merging is what ships.
+    branches: [master, staging]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  # Two deploys rebuilding the same containers at once leaves them in an
+  # unpredictable state. Queue instead of cancelling — a half-finished deploy
+  # is worse than a slow one.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        run: uv run pytest -q
+
+  deploy:
+    name: Deploy to api.wrenza.com
+    needs: test
+    # Only master, and never from a pull request — a fork could otherwise open
+    # a PR that runs against production.
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Authorise SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          # printf, not echo: a key must end in a trailing newline or ssh
+          # rejects it as malformed, and %s\n guarantees exactly one.
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Pin the host key rather than disabling checking, so a hijacked DNS
+          # record cannot silently redirect the deploy to another machine.
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Pull, rebuild, verify
+        # Passed as env rather than interpolated into the script body. These are
+        # trusted values, but keeping every `${{ }}` out of `run:` is the habit
+        # that stops an injectable one slipping in later.
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" 'bash -s' << 'REMOTE'
+          set -euo pipefail
+          cd /var/www/wrenza-backend
+
+          # --ff-only fails loudly if someone edited files on the server, rather
+          # than silently discarding their work the way `reset --hard` would.
+          git fetch origin master
+          git merge --ff-only origin/master
+
+          docker compose -f docker-compose.prod.yml up -d --build
+
+          # The API is not ready the moment compose returns: migrations run
+          # first, and on a schema change that is not instant. Poll rather than
+          # sleeping a fixed amount and hoping.
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/ping > /dev/null; then
+              echo "API healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "API did not come up — last 40 lines:" >&2
+          docker compose -f docker-compose.prod.yml logs api --tail 40 >&2
+          exit 1
+          REMOTE

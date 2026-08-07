@@ -81,6 +81,9 @@ def create_app() -> FastAPI:
         key_func=get_remote_address,
         default_limits=["100/minute"],
         storage_uri=settings.REDIS_URL,
+        # Without this slowapi writes bare LIMITER/... keys, which another
+        # slowapi app on the same Redis would share — and so would its limits
+        key_prefix="wz:ratelimit",
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

@@ -9,7 +9,8 @@ from redis.exceptions import RedisError
 
 from app.core.config import get_settings
 
-DENYLIST_PREFIX = "denylist:"
+# Namespaced: "denylist:" alone is a name any other auth service might use
+DENYLIST_PREFIX = "wz:denylist:"
 
 
 def _hash(plain: str) -> str:

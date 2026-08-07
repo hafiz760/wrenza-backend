@@ -3,8 +3,12 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-# Namespaces every key, so this Redis can be shared with other apps
-CACHE_PREFIX = "wz"
+# Every Redis key this app writes starts with this. The server runs other
+# projects against Redis, and arq in particular defaults to a queue name that
+# any other arq app would happily consume jobs from.
+NAMESPACE = "wz"
+
+CACHE_PREFIX = NAMESPACE
 DEFAULT_TTL = 300  # 5 minutes
 TTL_SHORT = 300    # 5 min — product lists (filtered, paginated)
 TTL_MEDIUM = 1800  # 30 min — featured, new arrivals, categories

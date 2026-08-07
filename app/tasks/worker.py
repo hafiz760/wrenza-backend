@@ -26,8 +26,16 @@ def get_redis_settings() -> RedisSettings:
     return RedisSettings(host=host, port=int(port), database=database)
 
 
+# arq defaults to the queue name "arq:queue". Two arq applications sharing a
+# Redis would take each other's jobs — silently, and only under load. Both the
+# worker and the enqueue side must name the same queue.
+QUEUE_NAME = "wz:queue"
+
+
 class WorkerSettings:
     """arq worker configuration."""
+
+    queue_name = QUEUE_NAME
 
     # Every job the queue can run. A name missing here is silently dropped
     # at enqueue time, so this list and the enqueue calls must stay in step.

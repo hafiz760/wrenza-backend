@@ -8,7 +8,7 @@ import structlog
 from arq import create_pool
 from arq.connections import ArqRedis
 
-from app.tasks.worker import get_redis_settings
+from app.tasks.worker import QUEUE_NAME, get_redis_settings
 
 logger = structlog.get_logger()
 
@@ -21,7 +21,9 @@ async def init_queue() -> ArqRedis | None:
     """Open the queue connection. Called once from the app lifespan."""
     global _pool
     try:
-        _pool = await create_pool(get_redis_settings())
+        _pool = await create_pool(
+            get_redis_settings(), default_queue_name=QUEUE_NAME
+        )
     except Exception as exc:
         # A queue that will not connect is worth knowing about, but it must not
         # stop the API from serving — reads and checkout still work without it.

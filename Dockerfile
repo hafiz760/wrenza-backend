@@ -9,7 +9,12 @@ FROM python:3.14-slim AS base
 
 # uv resolves and installs from the lockfile — same tool used locally, so the
 # container cannot drift to different package versions than your machine.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+#
+# From PyPI rather than `COPY --from=ghcr.io/astral-sh/uv`. The image is public,
+# but a shared server carrying any expired ghcr.io credential makes Docker send
+# it instead of fetching anonymously, and the build dies on `denied`. Everything
+# else here already comes from PyPI, so this drops a registry we do not need.
+RUN pip install --no-cache-dir uv
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
