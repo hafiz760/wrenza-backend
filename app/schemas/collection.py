@@ -17,7 +17,12 @@ class CollectionOut(CamelModel):
     season: str | None = None
     year: int | None = None
     is_featured: bool
+    is_indexable: bool
+    meta_title: str | None = None
+    meta_description: str | None = None
+    canonical_url: str | None = None
     created_at: datetime
+    updated_at: datetime
 
 
 class CollectionCreate(CamelModel):
@@ -36,6 +41,10 @@ class CollectionCreate(CamelModel):
     season: Annotated[str, Field(min_length=1, max_length=50)] | None = None
     year: Annotated[int, Field(ge=1900, le=2100)] | None = None
     is_featured: bool = False
+    is_indexable: bool = True
+    meta_title: Annotated[str, Field(min_length=1, max_length=255)] | None = None
+    meta_description: Annotated[str, Field(min_length=1, max_length=2000)] | None = None
+    canonical_url: Annotated[str, Field(max_length=500)] | None = None
 
 
 class CollectionUpdate(CamelModel):
@@ -55,3 +64,7 @@ class CollectionUpdate(CamelModel):
     year: Annotated[int, Field(ge=1900, le=2100)] | None = None
     is_featured: bool | None = None
     is_active: bool | None = None
+    is_indexable: bool | None = None
+    meta_title: Annotated[str, Field(min_length=1, max_length=255)] | None = None
+    meta_description: Annotated[str, Field(min_length=1, max_length=2000)] | None = None
+    canonical_url: Annotated[str, Field(max_length=500)] | None = None

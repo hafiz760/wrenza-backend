@@ -20,7 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin, UUIDMixin
 
 
-class Category(Base, UUIDMixin):
+class Category(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "categories"
 
 
@@ -33,9 +33,10 @@ class Category(Base, UUIDMixin):
         nullable=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    is_indexable: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    meta_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    meta_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    canonical_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationships
     parent: Mapped["Category | None"] = relationship(
@@ -89,6 +90,7 @@ class Product(Base, UUIDMixin, TimestampMixin):
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
     is_new_arrival: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_indexable: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
     # Stock-keeping unit. Variations carry their own; this covers simple
     # products and is what Product schema's `sku` reports.
     sku: Mapped[str | None] = mapped_column(
@@ -182,7 +184,7 @@ class ProductImage(Base, UUIDMixin):
     )
 
 
-class Collection(Base, UUIDMixin):
+class Collection(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "collections"
 
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -195,6 +197,7 @@ class Collection(Base, UUIDMixin):
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    is_indexable: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    meta_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    meta_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    canonical_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
