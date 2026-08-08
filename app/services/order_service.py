@@ -122,7 +122,7 @@ async def _reserve_line_item(db: AsyncSession, item_data) -> tuple[dict, Decimal
 
     # by_alias so the snapshot is camelCase like every other payload. It is
     # stored as an opaque dict, so nothing downstream would convert it later.
-    snapshot = _product_to_list_out(product).model_dump(by_alias=True)
+    snapshot = _product_to_list_out(product).model_dump(mode="json", by_alias=True)
     if product.kind == "variable":
         terms = await db.execute(
             select(AttributeTerm)
