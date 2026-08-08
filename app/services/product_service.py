@@ -154,6 +154,8 @@ def _product_to_list_out(
         stock=stock,
         is_featured=p.is_featured,
         is_new_arrival=p.is_new_arrival,
+        is_indexable=p.is_indexable,
+        updated_at=p.updated_at,
     )
 
 
@@ -193,6 +195,9 @@ def _product_to_full_out(
         stock=stock,
         is_featured=p.is_featured,
         is_new_arrival=p.is_new_arrival,
+        is_indexable=p.is_indexable,
+        meta_title=p.meta_title,
+        meta_description=p.meta_description,
         created_at=p.created_at,
         updated_at=p.updated_at,
     )
