@@ -32,6 +32,11 @@ class CategoryOut(CamelModel):
     slug: str
     description: str | None = None
     image_url: str | None = None
+    meta_title: str | None = None
+    meta_description: str | None = None
+    canonical_url: str | None = None
+    is_indexable: bool
+    updated_at: datetime
     children: list["CategoryOut"] = Field(default_factory=list)
 
 
@@ -46,6 +51,10 @@ class CategoryCreate(CamelModel):
     ) = None
     description: Annotated[str, Field(max_length=2000)] | None = None
     image_url: Annotated[str, Field(min_length=1, max_length=500)] | None = None
+    meta_title: Annotated[str, Field(min_length=1, max_length=255)] | None = None
+    meta_description: Annotated[str, Field(min_length=1, max_length=2000)] | None = None
+    canonical_url: Annotated[str, Field(max_length=500)] | None = None
+    is_indexable: bool = True
     parent_id: UUID | None = None
 
     @field_validator("parent_id", mode="before")
@@ -67,6 +76,10 @@ class CategoryUpdate(CamelModel):
     ) = None
     description: Annotated[str, Field(max_length=2000)] | None = None
     image_url: Annotated[str, Field(min_length=1, max_length=500)] | None = None
+    meta_title: Annotated[str, Field(min_length=1, max_length=255)] | None = None
+    meta_description: Annotated[str, Field(min_length=1, max_length=2000)] | None = None
+    canonical_url: Annotated[str, Field(max_length=500)] | None = None
+    is_indexable: bool | None = None
     parent_id: UUID | None = None
     is_active: bool | None = None
 
@@ -113,6 +126,7 @@ class ProductOut(CamelModel):
     stock: int
     is_featured: bool
     is_new_arrival: bool
+    is_indexable: bool
     created_at: datetime
     updated_at: datetime
 
@@ -145,6 +159,8 @@ class ProductListOut(CamelModel):
     stock: int
     is_featured: bool
     is_new_arrival: bool
+    is_indexable: bool
+    updated_at: datetime
     # Lets a card tell "add to cart" from "choose options" without fetching the
     # detail payload — a variable product needs a variation before it can sell.
     kind: Literal["simple", "variable"] = "simple"
@@ -193,6 +209,7 @@ class ProductCreate(CamelModel):
     stock: Annotated[int, Field(ge=0)] = 0
     is_featured: bool = False
     is_new_arrival: bool = False
+    is_indexable: bool = True
     sku: Annotated[str, Field(min_length=1, max_length=100)] | None = None
     canonical_url: Annotated[str, Field(max_length=500)] | None = None
     og_image: Annotated[str, Field(max_length=500)] | None = None
@@ -240,6 +257,7 @@ class ProductUpdate(CamelModel):
     is_featured: bool | None = None
     is_new_arrival: bool | None = None
     is_active: bool | None = None
+    is_indexable: bool | None = None
     sku: Annotated[str, Field(min_length=1, max_length=100)] | None = None
     canonical_url: Annotated[str, Field(max_length=500)] | None = None
     og_image: Annotated[str, Field(max_length=500)] | None = None

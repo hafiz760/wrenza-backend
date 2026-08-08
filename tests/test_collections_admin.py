@@ -100,6 +100,66 @@ async def test_create_and_update_return_active_status(client, admin_headers):
     assert updated.json()["isActive"] is True
 
 
+# ── Products in a collection ────────────────────────────────────
+
+
+async def _product(client, admin_headers, name):
+    response = await client.post(
+        "/api/v1/admin/products",
+        headers=admin_headers,
+        json={"name": name, "description": "Leather.", "price": 2500, "stock": 5},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+@pytest.mark.asyncio
+async def test_collection_keeps_its_products(client, admin_headers):
+    """The dashboard had no product picker, so this path was never exercised."""
+    first = await _product(client, admin_headers, "Bifold One")
+    second = await _product(client, admin_headers, "Bifold Two")
+
+    created = await _collection(
+        client,
+        admin_headers,
+        name="Picked Edit",
+        productIds=[first["id"], second["id"]],
+    )
+    assert created["productIds"] == [first["id"], second["id"]]
+
+    response = await client.get("/api/v1/collections")
+    row = next(c for c in response.json() if c["slug"] == "picked-edit")
+    assert row["productIds"] == [first["id"], second["id"]]
+
+
+@pytest.mark.asyncio
+async def test_editing_other_fields_leaves_products_alone(client, admin_headers):
+    """`exclude_unset` should mean an unrelated edit does not empty the list."""
+    product = await _product(client, admin_headers, "Untouched Wallet")
+    collection = await _collection(
+        client, admin_headers, name="Stable Edit", productIds=[product["id"]]
+    )
+
+    updated = await client.put(
+        f"/api/v1/admin/collections/{collection['id']}",
+        headers=admin_headers,
+        json={"tagline": "Renamed only"},
+    )
+    assert updated.json()["productIds"] == [product["id"]]
+
+
+@pytest.mark.asyncio
+async def test_products_are_selectable_as_options(client, admin_headers):
+    """The picker reads this endpoint; without products it serves nothing."""
+    await _product(client, admin_headers, "Findable Belt")
+
+    response = await client.get(
+        "/api/v1/admin/options/products?search=Findable", headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    assert any(o["name"] == "Findable Belt" for o in response.json())
+
+
 @pytest.mark.asyncio
 async def test_public_payload_omits_active_status(client, admin_headers):
     """Every public collection is active, so the flag carries no information."""

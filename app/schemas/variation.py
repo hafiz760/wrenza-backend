@@ -23,6 +23,7 @@ class VariationValueOut(CamelModel):
 class VariationOut(CamelModel):
     id: str
     sku: str | None = None
+    gtin: str | None = None
     price: float
     compare_at_price: float | None = None
     stock: int
@@ -60,6 +61,7 @@ class VariationUpdate(CamelModel):
 
     id: str
     sku: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+    gtin: Annotated[str, Field(min_length=1, max_length=50)] | None = None
     price: Annotated[float, Field(ge=0)] | None = None
     compare_at_price: Annotated[float, Field(ge=0)] | None = None
     stock: Annotated[int, Field(ge=0)] | None = None

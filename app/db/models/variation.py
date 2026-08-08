@@ -85,6 +85,7 @@ class ProductVariation(Base, UUIDMixin, TimestampMixin):
     stock: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
+    gtin: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
 
     values: Mapped[list["VariationAttributeValue"]] = relationship(
         back_populates="variation",
