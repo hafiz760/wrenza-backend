@@ -187,6 +187,7 @@ def _product_to_full_out(
         featured_image=featured,
         images=gallery,
         category=p.category.slug if p.category else None,
+        product_type=p.product_type,
         dimensions=p.dimensions or {},
         care_instructions=p.care_instructions or [],
         tags=p.tags or [],
