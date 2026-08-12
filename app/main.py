@@ -141,6 +141,7 @@ def create_app() -> FastAPI:
     from app.api.admin.settings import router as admin_settings
     from app.api.admin.faqs import router as admin_faqs
     from app.api.admin.reviews import router as admin_reviews
+    from app.api.admin.media import router as admin_media
 
     app.include_router(admin_products, prefix="/api/v1/admin")
     app.include_router(admin_categories, prefix="/api/v1/admin")
@@ -159,6 +160,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_settings, prefix="/api/v1/admin")
     app.include_router(admin_faqs, prefix="/api/v1/admin")
     app.include_router(admin_reviews, prefix="/api/v1/admin")
+    app.include_router(admin_media, prefix="/api/v1/admin")
 
     # ── Global exception handlers ──────────────────────────────
 
