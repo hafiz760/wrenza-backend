@@ -2,7 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Query
 
-from app.core.deps import AdminUser, DbSession
+from app.core.deps import AdminUser, DbSession, RedisClient
 from app.schemas.order import OrderStatusUpdate
 from app.services import order_service
 
@@ -48,6 +48,8 @@ async def update_order_status(
 
 
 @router.post("/{order_id}/cancel")
-async def cancel_order(order_id: str, admin: AdminUser, db: DbSession):
+async def cancel_order(
+    order_id: str, admin: AdminUser, db: DbSession, redis: RedisClient
+):
     """Cancel any order and return its units to stock."""
-    return await order_service.cancel_order(db, order_id)
+    return await order_service.cancel_order(db, order_id, redis=redis)

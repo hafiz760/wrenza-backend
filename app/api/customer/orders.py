@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.core.deps import CurrentUser, DbSession
+from app.core.deps import CurrentUser, DbSession, RedisClient
 from app.schemas.order import OrderCreate
 from app.services import order_service
 
@@ -8,8 +8,10 @@ router = APIRouter(prefix="/orders", tags=["Orders"])
 
 
 @router.post("")
-async def place_order(data: OrderCreate, user: CurrentUser, db: DbSession):
-    return await order_service.create_order(db, user.id, data)
+async def place_order(
+    data: OrderCreate, user: CurrentUser, db: DbSession, redis: RedisClient
+):
+    return await order_service.create_order(db, user.id, data, redis=redis)
 
 
 @router.get("")
@@ -23,6 +25,8 @@ async def get_order(order_id: str, user: CurrentUser, db: DbSession):
 
 
 @router.post("/{order_id}/cancel")
-async def cancel_order(order_id: str, user: CurrentUser, db: DbSession):
+async def cancel_order(
+    order_id: str, user: CurrentUser, db: DbSession, redis: RedisClient
+):
     """Cancel your own order while it is still cancellable."""
-    return await order_service.cancel_order(db, order_id, user_id=user.id)
+    return await order_service.cancel_order(db, order_id, user_id=user.id, redis=redis)

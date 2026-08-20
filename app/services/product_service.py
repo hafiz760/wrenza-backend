@@ -1,3 +1,5 @@
+import hashlib
+import json
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -218,6 +220,34 @@ async def list_products(
     page: int = 1,
     page_size: int = 12,
 ) -> PaginatedResponse[ProductListOut]:
+    # Every argument goes into the key — a listing filtered by colour must not
+    # be served to someone filtering by price. Hashed rather than concatenated
+    # because a search term or an id list would otherwise produce unbounded key
+    # lengths, and `ids` can hold a whole wishlist.
+    fingerprint = json.dumps(
+        {
+            "category": category,
+            "min_price": min_price,
+            "max_price": max_price,
+            "product_type": product_type,
+            "attribute_terms": sorted(attribute_terms) if attribute_terms else None,
+            "ids": ids,
+            "sort_by": sort_by,
+            "search": search,
+            "page": page,
+            "page_size": page_size,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    ck = cache_key(
+        "products", "list", hashlib.sha1(fingerprint.encode()).hexdigest()[:16]
+    )
+    if redis:
+        cached = await cache_get(redis, ck)
+        if cached is not None:
+            return PaginatedResponse[ProductListOut].model_validate(cached)
+
     query = (
         select(Product)
         .options(selectinload(Product.images), selectinload(Product.category))
@@ -287,13 +317,18 @@ async def list_products(
         _product_to_list_out(p, swatches.get(str(p.id))) for p in result["items"]
     ]
 
-    return PaginatedResponse(
+    payload = PaginatedResponse(
         items=items,
         total=result["total"],
         page=result["page"],
         page_size=result["page_size"],
         total_pages=result["total_pages"],
     )
+
+    if redis:
+        await cache_set(redis, ck, payload.model_dump(mode="json"), ttl=TTL_SHORT)
+
+    return payload
 
 
 async def list_products_admin(
@@ -488,6 +523,16 @@ async def get_filters(db: AsyncSession) -> ProductFiltersOut:
 
 
 async def get_by_slug(db: AsyncSession, redis: Redis | None, slug: str) -> ProductOut:
+    # The most expensive read in the catalogue — images, category, variations,
+    # attributes and FAQs, each its own round trip. Every write path already
+    # calls cache_delete_pattern("products:detail:*"), so a stale entry cannot
+    # outlive an edit.
+    ck = cache_key("products", "detail", slug)
+    if redis:
+        cached = await cache_get(redis, ck)
+        if cached is not None:
+            return ProductOut.model_validate(cached)
+
     result = await db.execute(
         select(Product)
         .options(
@@ -504,7 +549,15 @@ async def get_by_slug(db: AsyncSession, redis: Redis | None, slug: str) -> Produ
 
     attributes, variations = await _load_options(db, product)
     faqs = await faq_service.list_for_product(db, str(product.id))
-    return _product_to_full_out(product, attributes, variations, faqs)
+    out = _product_to_full_out(product, attributes, variations, faqs)
+
+    if redis:
+        # `mode="json"` for the same reason order snapshots need it: the
+        # payload carries datetimes and Decimals, and json.dumps cannot
+        # serialise either.
+        await cache_set(redis, ck, out.model_dump(mode="json"), ttl=TTL_LONG)
+
+    return out
 
 
 async def _load_options(
@@ -530,6 +583,14 @@ async def _load_options(
 async def get_featured(
     db: AsyncSession, redis: Redis | None, limit: int = 8
 ) -> list[ProductListOut]:
+    # Keyed by limit as well as name: the homepage asks for 8 and a section
+    # elsewhere could ask for 4, and one must not serve the other's answer.
+    ck = cache_key("products", "featured", str(limit))
+    if redis:
+        cached = await cache_get(redis, ck)
+        if cached is not None:
+            return [ProductListOut.model_validate(item) for item in cached]
+
     result = await db.execute(
         select(Product)
         .options(selectinload(Product.images), selectinload(Product.category))
@@ -539,12 +600,27 @@ async def get_featured(
     )
     products = list(result.scalars().all())
     swatches = await load_swatches(db, products)
-    return [_product_to_list_out(p, swatches.get(str(p.id))) for p in products]
+    items = [_product_to_list_out(p, swatches.get(str(p.id))) for p in products]
+
+    if redis:
+        await cache_set(
+            redis, ck, [i.model_dump(mode="json") for i in items], ttl=TTL_MEDIUM
+        )
+
+    return items
 
 
 async def get_new_arrivals(
     db: AsyncSession, redis: Redis | None, limit: int = 8
 ) -> list[ProductListOut]:
+    # Keyed by limit as well as name: the homepage asks for 8 and a section
+    # elsewhere could ask for 4, and one must not serve the other's answer.
+    ck = cache_key("products", "new-arrivals", str(limit))
+    if redis:
+        cached = await cache_get(redis, ck)
+        if cached is not None:
+            return [ProductListOut.model_validate(item) for item in cached]
+
     result = await db.execute(
         select(Product)
         .options(selectinload(Product.images), selectinload(Product.category))
@@ -554,7 +630,14 @@ async def get_new_arrivals(
     )
     products = list(result.scalars().all())
     swatches = await load_swatches(db, products)
-    return [_product_to_list_out(p, swatches.get(str(p.id))) for p in products]
+    items = [_product_to_list_out(p, swatches.get(str(p.id))) for p in products]
+
+    if redis:
+        await cache_set(
+            redis, ck, [i.model_dump(mode="json") for i in items], ttl=TTL_MEDIUM
+        )
+
+    return items
 
 
 async def get_related(

@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import selectinload
 
-from app.core.deps import AdminUser, DbSession
+from app.core.deps import AdminUser, DbSession, RedisClient
+from app.utils.cache import cache_delete_pattern
 from app.db.models.product import Product
 from app.db.models.review import Review
 from app.schemas.common import CamelModel, MessageResponse
@@ -73,11 +74,17 @@ async def list_reviews(
             "id": str(review.id),
             "product_id": str(review.product_id),
             "product_name": review.product.name if review.product else "—",
+            # A guest review has no user row; fall back to what they typed.
             "customer_name": (
                 f"{review.user.first_name} {review.user.last_name}".strip()
                 if review.user
-                else "—"
+                else (review.guest_name or "—")
             ),
+            # Admin-only. Never present in the public review payload.
+            "customer_email": (
+                review.user.email if review.user else review.guest_email
+            ),
+            "is_guest": review.user_id is None,
             "rating": review.rating,
             "comment": review.comment,
             "is_approved": review.is_approved,
@@ -95,6 +102,7 @@ async def set_review_approval(
     review_id: str,
     admin: AdminUser,
     db: DbSession,
+    redis: RedisClient,
     approved: bool = True,
 ):
     review = await db.scalar(select(Review).where(Review.id == review_id))
@@ -104,6 +112,10 @@ async def set_review_approval(
     review.is_approved = approved
     await _recalculate_product_rating(db, review.product_id)
     await db.commit()
+
+    # Approving or hiding changes the product's rating and review count, both
+    # of which sit inside the cached product payloads.
+    await cache_delete_pattern(redis, "products:*")
 
     return camelize(
         {
@@ -115,7 +127,9 @@ async def set_review_approval(
 
 
 @router.delete("/{review_id}", response_model=MessageResponse)
-async def delete_review(review_id: str, admin: AdminUser, db: DbSession):
+async def delete_review(
+    review_id: str, admin: AdminUser, db: DbSession, redis: RedisClient
+):
     review = await db.scalar(select(Review).where(Review.id == review_id))
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
@@ -125,5 +139,6 @@ async def delete_review(review_id: str, admin: AdminUser, db: DbSession):
     await db.flush()
     await _recalculate_product_rating(db, product_id)
     await db.commit()
+    await cache_delete_pattern(redis, "products:*")
 
     return MessageResponse(message="Review deleted")

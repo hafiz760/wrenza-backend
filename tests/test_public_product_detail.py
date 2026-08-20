@@ -68,6 +68,14 @@ async def test_public_reviews_returns_items_and_histogram(
     )
     assert created.status_code == 200, created.text
 
+    # Reviews are created pending — anyone can post one, so nothing reaches
+    # the storefront until an admin approves it.
+    approved = await client.put(
+        f"/api/v1/admin/reviews/{created.json()['id']}/approve?approved=true",
+        headers=admin_headers,
+    )
+    assert approved.status_code == 200, approved.text
+
     response = await client.get(f"/api/v1/products/{product['slug']}/reviews")
     assert response.status_code == 200, response.text
     body = response.json()

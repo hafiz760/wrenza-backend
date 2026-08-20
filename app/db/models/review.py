@@ -25,17 +25,29 @@ class Review(Base, UUIDMixin):
     product_id: Mapped[str] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE")
     )
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # Null for a guest review. The storefront accepts reviews without an
+    # account, which is how the Shopify review apps behave — the credibility
+    # cost is paid by moderation instead.
+    user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    # Set only when user_id is null; a signed-in review takes its name from
+    # the account so it cannot be spoofed.
+    guest_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Never exposed publicly. Admin-only, for spotting abuse and replying.
+    guest_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     rating: Mapped[int] = mapped_column(Integer)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
-    is_approved: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Pending by default: anyone can post, so nothing reaches the storefront
+    # until an admin approves it.
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
     # Relationships (string refs)
     product: Mapped["Product"] = relationship(back_populates="reviews")
-    user: Mapped["User"] = relationship(back_populates="reviews")
+    user: Mapped["User | None"] = relationship(back_populates="reviews")
 
 
 class Testimonial(Base, UUIDMixin):
