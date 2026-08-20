@@ -72,19 +72,14 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "Accept"],
     )
 
-    # Rate limiting (Redis-backed for multi-worker consistency)
-    from slowapi import Limiter, _rate_limit_exceeded_handler
+    # Rate limiting (Redis-backed for multi-worker consistency). The limiter
+    # itself lives in app.core.limiter so routers can attach per-endpoint
+    # limits to it.
+    from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
-    from slowapi.util import get_remote_address
 
-    limiter = Limiter(
-        key_func=get_remote_address,
-        default_limits=["100/minute"],
-        storage_uri=settings.REDIS_URL,
-        # Without this slowapi writes bare LIMITER/... keys, which another
-        # slowapi app on the same Redis would share — and so would its limits
-        key_prefix="wz:ratelimit",
-    )
+    from app.core.limiter import limiter
+
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -142,6 +137,7 @@ def create_app() -> FastAPI:
     from app.api.admin.faqs import router as admin_faqs
     from app.api.admin.reviews import router as admin_reviews
     from app.api.admin.media import router as admin_media
+    from app.api.admin.cache import router as admin_cache
 
     app.include_router(admin_products, prefix="/api/v1/admin")
     app.include_router(admin_categories, prefix="/api/v1/admin")
@@ -161,6 +157,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_faqs, prefix="/api/v1/admin")
     app.include_router(admin_reviews, prefix="/api/v1/admin")
     app.include_router(admin_media, prefix="/api/v1/admin")
+    app.include_router(admin_cache, prefix="/api/v1/admin")
 
     # ── Global exception handlers ──────────────────────────────
 

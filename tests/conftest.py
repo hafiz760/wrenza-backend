@@ -1,4 +1,5 @@
 import asyncio
+import fnmatch
 from unittest.mock import AsyncMock
 
 import pytest
@@ -23,6 +24,23 @@ def event_loop():
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(autouse=True)
+def disable_rate_limits():
+    """Take slowapi out of the picture for the whole suite.
+
+    Its storage is process-wide, so one test's requests eat the next test's
+    budget and the suite becomes order-dependent. Worse, it is Redis-backed
+    when a Redis is reachable and fails open when one is not — so the limits
+    apply on a developer machine and not on CI, which has no Redis service.
+    Tests should cover behaviour, not which daemons happen to be running.
+    """
+    from app.core.limiter import limiter
+
+    limiter.enabled = False
+    yield
+    limiter.enabled = True
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -60,7 +78,23 @@ class FakeRedis:
         return sum(1 for k in keys if self.store.pop(k, None) is not None)
 
     async def scan(self, cursor=0, match=None, count=None):
-        return (0, [])
+        """Real glob matching, in one pass.
+
+        Returning an empty list unconditionally — as this did — made
+        `cache_delete_pattern` a silent no-op, so every test that believed it
+        was exercising cache invalidation was exercising nothing.
+
+        Cursor is always 0: the store is a dict and there is nothing to page
+        through, which is the one way this differs from Redis.
+        """
+        keys = list(self.store)
+        if match is not None:
+            keys = [k for k in keys if fnmatch.fnmatchcase(k, match)]
+        return (0, keys)
+
+    async def ttl(self, key):
+        # TTLs are not modelled; -1 is Redis for "exists, never expires".
+        return -1 if key in self.store else -2
 
     def flush(self):
         self.store.clear()

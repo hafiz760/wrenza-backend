@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, desc, func, or_
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -12,6 +13,7 @@ from app.db.models.attribute import AttributeTerm
 from app.db.models.product import Product
 from app.db.models.variation import ProductVariation, VariationAttributeValue
 from app.db.models.user import Address
+from app.utils.cache import cache_delete_pattern
 from app.services.product_service import _product_to_list_out
 from app.schemas.order import (
     CheckoutRequest,
@@ -162,7 +164,9 @@ async def _generate_order_number(db: AsyncSession) -> str:
     return f"WZ-{year}-{(count or 0) + 1:03d}"
 
 
-async def create_order(db: AsyncSession, user_id: str, data: OrderCreate) -> OrderOut:
+async def create_order(
+    db: AsyncSession, user_id: str, data: OrderCreate, redis: Redis | None = None
+) -> OrderOut:
     # Resolve shipping address
     shipping_address: dict
     if data.address_id:
@@ -260,6 +264,7 @@ async def create_order(db: AsyncSession, user_id: str, data: OrderCreate) -> Ord
         )
 
     await db.commit()
+    await _invalidate_product_cache(redis)
 
     # Queued after the commit: the job loads the order by id, so it must exist
     # before the worker can pick it up.
@@ -275,7 +280,10 @@ async def create_order(db: AsyncSession, user_id: str, data: OrderCreate) -> Ord
 
 
 async def create_checkout_order(
-    db: AsyncSession, data: CheckoutRequest, user_id: str | None = None
+    db: AsyncSession,
+    data: CheckoutRequest,
+    user_id: str | None = None,
+    redis: Redis | None = None,
 ) -> OrderOut:
     """Unified checkout for both guest and authenticated users.
     Matches the frontend checkout form: email, phone, name, address, items."""
@@ -355,6 +363,7 @@ async def create_checkout_order(
         )
 
     await db.commit()
+    await _invalidate_product_cache(redis)
 
     await enqueue("send_order_confirmation", str(order.id))
 
@@ -398,6 +407,17 @@ VALID_TRANSITIONS = {
     OrderStatus.DELIVERED: [],
     OrderStatus.CANCELLED: [],
 }
+
+
+async def _invalidate_product_cache(redis: Redis | None) -> None:
+    """Drop cached product payloads after a stock movement.
+
+    Stock is part of the cached product detail, and detail is held for two
+    hours. Without this a sold-out product keeps advertising itself as in
+    stock until the entry expires, which is how a shop oversells.
+    """
+    if redis is not None:
+        await cache_delete_pattern(redis, "products:*")
 
 
 async def _restore_stock(db: AsyncSession, order: Order) -> None:
@@ -463,7 +483,10 @@ async def update_order_status(
 
 
 async def cancel_order(
-    db: AsyncSession, order_id: str, user_id: str | None = None
+    db: AsyncSession,
+    order_id: str,
+    user_id: str | None = None,
+    redis: Redis | None = None,
 ) -> OrderOut:
     """Cancel an order and return its stock.
 
@@ -487,6 +510,7 @@ async def cancel_order(
     await _restore_stock(db, order)
     order.status = OrderStatus.CANCELLED.value
     await db.commit()
+    await _invalidate_product_cache(redis)
 
     await enqueue("send_order_cancelled", str(order.id))
 

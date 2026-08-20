@@ -1,20 +1,35 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import EmailStr, Field
 
 from app.schemas.common import CamelModel
 
 
 class ReviewCreate(CamelModel):
+    """A review from either a signed-in customer or a guest.
+
+    `name` and `email` are required for a guest and ignored for a signed-in
+    customer, whose details come from the account instead — so a display name
+    on a signed-in review cannot be forged.
+    """
+
     product_id: Annotated[str, Field(min_length=1, max_length=36)]
     rating: Annotated[int, Field(ge=1, le=5)]
     comment: Annotated[str, Field(min_length=1, max_length=2000)] | None = None
+    name: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+    email: EmailStr | None = None
 
 
 class ReviewOut(CamelModel):
+    """One approved review, as the storefront sees it.
+
+    `user_id` is null for a guest. The guest's email is deliberately absent —
+    publishing it on a public product page would leak it to scrapers.
+    """
+
     id: str
-    user_id: str
+    user_id: str | None = None
     user_name: str
     rating: int
     comment: str | None = None
