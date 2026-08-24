@@ -119,6 +119,7 @@ class OrderOut(CamelModel):
     status: str
     subtotal: float
     shipping: float
+    tax: float
     discount: float
     total: float
     shipping_address: dict

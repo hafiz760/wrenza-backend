@@ -53,3 +53,14 @@ async def cancel_order(
 ):
     """Cancel any order and return its units to stock."""
     return await order_service.cancel_order(db, order_id, admin_id=admin.id, redis=redis)
+
+
+@router.delete("/{order_id}")
+async def delete_order(order_id: str, admin: AdminUser, db: DbSession, redis: RedisClient):
+    """Permanently remove an order and its items.
+
+    For cleaning up test orders — there is no equivalent on the customer or
+    public routers, and nothing else in the app exposes this.
+    """
+    await order_service.delete_order(db, order_id, redis=redis, admin_id=admin.id)
+    return {"message": "Order deleted"}
