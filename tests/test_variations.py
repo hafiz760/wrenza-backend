@@ -178,6 +178,17 @@ async def test_term_from_wrong_attribute_rejected(client, admin_headers, setup):
 
 @pytest.mark.asyncio
 async def test_variation_images_are_scoped(client, admin_headers, setup):
+    """A variation's own images stay its own — `ProductImage.variation_id`
+    keeps them out of `product.images`, so an edit to the product's gallery
+    can never touch or duplicate them.
+
+    The product's own listing card is a separate question. With nothing
+    photographed at the product level, the card falls back to a variation's
+    photo (see test_card_image_fallback.py) rather than showing a blank
+    placeholder — that is `featuredImage`, and it is expected to be
+    populated here. What must not happen is the variation's *gallery*
+    physically becoming part of the product's own `images` rows.
+    """
     pid = setup["product_id"]
     generated = await client.post(
         f"/api/v1/admin/products/{pid}/variations/generate", headers=admin_headers
@@ -192,11 +203,10 @@ async def test_variation_images_are_scoped(client, admin_headers, setup):
     assert response.status_code == 200
     assert response.json()["featuredImage"]["url"] == "https://cdn.test/black.jpg"
 
-    # Must not leak into the product-level gallery
     product = await client.get("/api/v1/products?pageSize=50")
     row = next(p for p in product.json()["items"] if p["id"] == pid)
     assert row["images"] == []
-    assert row["featuredImage"] is None
+    assert row["featuredImage"]["url"] == "https://cdn.test/black.jpg"
 
 
 @pytest.mark.asyncio
