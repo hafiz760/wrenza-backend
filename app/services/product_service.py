@@ -190,6 +190,7 @@ def _product_to_full_out(
         images=gallery,
         category=p.category.slug if p.category else None,
         product_type=p.product_type,
+        a_plus_content=p.a_plus_content,
         dimensions=p.dimensions or {},
         care_instructions=p.care_instructions or [],
         tags=p.tags or [],
@@ -682,6 +683,11 @@ async def create_product(
         compare_at_price=data.compare_at_price,
         category_id=data.category_id,
         product_type=data.product_type,
+        a_plus_content=(
+            data.a_plus_content.model_dump(mode="json")
+            if data.a_plus_content
+            else None
+        ),
         dimensions=data.dimensions.model_dump(),
         care_instructions=data.care_instructions,
         tags=data.tags,

@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 # pyrefly: ignore [missing-import]
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.schemas.common import CamelModel
 
@@ -12,7 +12,7 @@ from app.schemas.common import CamelModel
 from app.schemas.faq import FaqOut
 from app.schemas.image import ProductImageCreate, ProductImageOut
 from app.schemas.variation import ProductAttributeOut, VariationOut
-from app.utils.html import sanitize_html
+from app.utils.html import sanitize_html, to_plain_text
 
 __all__ = [
     "ProductImageCreate",
@@ -98,6 +98,50 @@ class PriceRange(CamelModel):
     max: float
 
 
+class APlusImage(CamelModel):
+    """One composition of the A+ section.
+
+    `width`/`height` come from ImageKit at upload. They default to 0 rather
+    than being required because older uploads did not report them, but an A+
+    image is tall enough that a missing size means a very visible jump when it
+    loads — the dashboard sends them.
+    """
+
+    url: Annotated[str, Field(min_length=1, max_length=500)]
+    width: int = 0
+    height: int = 0
+
+
+class APlusContent(CamelModel):
+    """Optional marketing image below the product tabs.
+
+    Two images, not one scaled: the text is part of the picture, so a desktop
+    composition shrunk to a phone is unreadable.
+    """
+
+    desktop: APlusImage | None = None
+    mobile: APlusImage | None = None
+    alt: Annotated[str, Field(max_length=255)] | None = None
+
+    @field_validator("alt", mode="after")
+    @classmethod
+    def plain_text_only(cls, value: str | None) -> str | None:
+        """Alt text is an attribute, not markup."""
+        return to_plain_text(value) or None if value else None
+
+    @model_validator(mode="after")
+    def require_alt_with_an_image(self) -> "APlusContent":
+        """Everything in the image is invisible without it.
+
+        The copy is baked into the pixels, so alt text is the only thing a
+        search engine or a screen reader ever gets from this section. An image
+        without it is a silent hole in the page.
+        """
+        if (self.desktop or self.mobile) and not self.alt:
+            raise ValueError("alt text is required when an A+ image is set")
+        return self
+
+
 class ProductOut(CamelModel):
     """Full product detail — matches frontend Product type exactly."""
 
@@ -118,6 +162,7 @@ class ProductOut(CamelModel):
     images: list[ProductImageOut] = Field(default_factory=list)
     category: str | None = None
     product_type: str | None = None
+    a_plus_content: APlusContent | None = None
     dimensions: ProductDimensions = Field(default_factory=ProductDimensions)
     care_instructions: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
@@ -199,6 +244,7 @@ class ProductCreate(CamelModel):
     product_type: (
         Literal["wallet", "bag", "belt", "card-holder", "accessory"] | None
     ) = None
+    a_plus_content: APlusContent | None = None
     dimensions: ProductDimensions = Field(default_factory=ProductDimensions)
     care_instructions: list[Annotated[str, Field(min_length=1, max_length=200)]] = (
         Field(default_factory=list)
@@ -248,6 +294,7 @@ class ProductUpdate(CamelModel):
     product_type: (
         Literal["wallet", "bag", "belt", "card-holder", "accessory"] | None
     ) = None
+    a_plus_content: APlusContent | None = None
     dimensions: ProductDimensions | None = None
     care_instructions: (
         list[Annotated[str, Field(min_length=1, max_length=200)]] | None
