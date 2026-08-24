@@ -337,7 +337,26 @@ async def generate_variations(
             ),
         )
 
-    axis_terms = [[str(t.term_id) for t in pa.terms] for pa in axes]
+    # `pa.terms` is unordered — nothing sorts the join table itself, so its
+    # row order is whatever SQLite happens to return, which is not guaranteed
+    # and was observed to change under load. Queried explicitly here instead,
+    # ordered the same way `load_swatches` orders terms elsewhere, so which
+    # variation lands in position 0 is deterministic — the admin's product
+    # listing and card fall back to exactly that variation when nothing is
+    # photographed at the product level.
+    term_rows = await db.execute(
+        select(ProductAttributeTerm.product_attribute_id, ProductAttributeTerm.term_id)
+        .join(AttributeTerm, AttributeTerm.id == ProductAttributeTerm.term_id)
+        .where(
+            ProductAttributeTerm.product_attribute_id.in_([pa.id for pa in axes])
+        )
+        .order_by(AttributeTerm.position, AttributeTerm.value)
+    )
+    terms_by_axis: dict[str, list[str]] = {}
+    for attribute_id, term_id in term_rows.all():
+        terms_by_axis.setdefault(str(attribute_id), []).append(str(term_id))
+
+    axis_terms = [terms_by_axis.get(str(pa.id), []) for pa in axes]
     if any(not terms for terms in axis_terms):
         raise HTTPException(
             status_code=422, detail="Every variation attribute needs at least one term."

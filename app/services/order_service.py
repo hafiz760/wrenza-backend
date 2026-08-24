@@ -8,14 +8,16 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.db.models.activity_log import ActivityLog
 from app.db.models.order import Order, OrderItem, OrderStatus
 from app.db.models.attribute import AttributeTerm
 from app.db.models.product import Product
 from app.db.models.variation import ProductVariation, VariationAttributeValue
-from app.db.models.user import Address
+from app.db.models.user import Address, User
 from app.utils.cache import cache_delete_pattern
-from app.services.product_service import _product_to_list_out
+from app.services.product_service import _pick_featured, _product_to_list_out
 from app.schemas.order import (
+    OrderStatusLogEntry,
     CheckoutRequest,
     OrderCreate,
     OrderOut,
@@ -141,6 +143,21 @@ async def _reserve_line_item(db: AsyncSession, item_data) -> tuple[dict, Decimal
             "sku": stock_holder.sku,
             "attributes": {t.attribute.name: t.value for t in terms.scalars().all()},
         }
+
+        # The purchased variation's own photo, not a bare product image or
+        # `_split_images`'s generic "first variation" fallback. A customer who
+        # bought Tan must not see Blue's photo on their order just because
+        # Blue happens to sit first in the variation list.
+        if stock_holder.images:
+            v_featured, v_gallery = _pick_featured(stock_holder.images)
+            snapshot["featuredImage"] = (
+                v_featured.model_dump(mode="json", by_alias=True)
+                if v_featured
+                else None
+            )
+            snapshot["images"] = [
+                img.model_dump(mode="json", by_alias=True) for img in v_gallery
+            ]
 
     stock_holder.stock -= item_data.quantity
 
@@ -444,7 +461,10 @@ async def _restore_stock(db: AsyncSession, order: Order) -> None:
 
 
 async def update_order_status(
-    db: AsyncSession, order_id: str, data: OrderStatusUpdate
+    db: AsyncSession,
+    order_id: str,
+    data: OrderStatusUpdate,
+    admin_id: str | None = None,
 ) -> OrderOut:
     result = await db.execute(
         select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
@@ -469,6 +489,19 @@ async def update_order_status(
     if data.tracking_number:
         order.tracking_number = data.tracking_number
 
+    # Nothing else records when an order moved between statuses — `status` is
+    # simply overwritten each time — so the detail page's timeline is built
+    # entirely from these rows.
+    db.add(
+        ActivityLog(
+            user_id=admin_id,
+            action="order_status_changed",
+            entity="order",
+            entity_id=str(order.id),
+            details={"from": current_status.value, "to": new_status.value},
+        )
+    )
+
     await db.commit()
 
     # The task filters to shipped/delivered — sending on every internal
@@ -486,11 +519,14 @@ async def cancel_order(
     db: AsyncSession,
     order_id: str,
     user_id: str | None = None,
+    admin_id: str | None = None,
     redis: Redis | None = None,
 ) -> OrderOut:
     """Cancel an order and return its stock.
 
-    `user_id` scopes the lookup for the customer-facing route; admins pass None.
+    `user_id` scopes the lookup for the customer-facing route and doubles as
+    the log's actor there; the admin route has no scoping id, so it passes
+    `admin_id` for the same purpose instead.
     """
     query = select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
     if user_id is not None:
@@ -509,6 +545,15 @@ async def cancel_order(
 
     await _restore_stock(db, order)
     order.status = OrderStatus.CANCELLED.value
+    db.add(
+        ActivityLog(
+            user_id=admin_id or user_id,
+            action="order_status_changed",
+            entity="order",
+            entity_id=str(order.id),
+            details={"from": current_status.value, "to": OrderStatus.CANCELLED.value},
+        )
+    )
     await db.commit()
     await _invalidate_product_cache(redis)
 
@@ -526,7 +571,34 @@ async def get_order_admin(db: AsyncSession, order_id: str) -> OrderOut:
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    return _order_to_out(order)
+
+    out = _order_to_out(order)
+    out.status_history = await _status_history(db, order_id)
+    return out
+
+
+async def _status_history(db: AsyncSession, order_id: str) -> list[OrderStatusLogEntry]:
+    """Logged transitions for the timeline, oldest first.
+
+    Outer-joined against `User` rather than a second round trip per row: an
+    admin account can be deleted later, and the log should still read rather
+    than 404 on a name lookup.
+    """
+    rows = await db.execute(
+        select(ActivityLog, User)
+        .outerjoin(User, ActivityLog.user_id == User.id)
+        .where(ActivityLog.entity == "order", ActivityLog.entity_id == order_id)
+        .order_by(ActivityLog.created_at)
+    )
+    return [
+        OrderStatusLogEntry(
+            from_status=(log.details or {}).get("from"),
+            to_status=(log.details or {}).get("to", ""),
+            changed_at=log.created_at,
+            changed_by=f"{user.first_name} {user.last_name}".strip() if user else None,
+        )
+        for log, user in rows.all()
+    ]
 
 
 async def get_all_orders(

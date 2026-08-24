@@ -93,6 +93,20 @@ class OrderItemOut(CamelModel):
     quantity: int
 
 
+class OrderStatusLogEntry(CamelModel):
+    """One logged transition, for the detail page's timeline.
+
+    `changed_by` is a display name rather than a user id: the timeline reads
+    naturally without the dashboard needing a second lookup, and the actor
+    still makes sense after the admin account itself is later deleted.
+    """
+
+    from_status: str | None = None
+    to_status: str
+    changed_at: datetime
+    changed_by: str | None = None
+
+
 class OrderOut(CamelModel):
     id: str
     order_number: str
@@ -112,6 +126,9 @@ class OrderOut(CamelModel):
     tracking_number: str | None = None
     created_at: datetime
     updated_at: datetime
+    # Only populated on the single-order admin detail fetch — a listing would
+    # otherwise pay for a history query on every row it never displays.
+    status_history: list[OrderStatusLogEntry] = Field(default_factory=list)
 
 
 class OrderStatusUpdate(CamelModel):

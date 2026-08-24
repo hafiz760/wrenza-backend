@@ -53,19 +53,45 @@ def _image_to_out(img: ProductImage) -> ProductImageOut:
     )
 
 
-def _split_images(p: Product) -> tuple[ProductImageOut | None, list[ProductImageOut]]:
-    """Separate the feature image from the gallery.
+def _pick_featured(
+    images: list[ProductImage],
+) -> tuple[ProductImageOut | None, list[ProductImageOut]]:
+    """A flagged image wins and is pulled out of the gallery.
 
-    Products created before feature images existed have nothing flagged, so the
-    first gallery image stands in and the gallery is left whole.
+    With nothing explicitly flagged, the first image is a convenience
+    pointer rather than a removal — the gallery stays the full list, so a
+    product photographed before feature images existed does not lose one of
+    its photos just because nothing was designated. Only an explicit flag
+    means "this one is separate from the rest."
     """
-    featured = next((img for img in p.images if img.is_featured), None)
-    if featured is not None:
-        gallery = [img for img in p.images if not img.is_featured]
-        return _image_to_out(featured), [_image_to_out(img) for img in gallery]
+    if not images:
+        return None, []
+    explicit = next((img for img in images if img.is_featured), None)
+    if explicit is not None:
+        gallery = [img for img in images if img is not explicit]
+        return _image_to_out(explicit), [_image_to_out(img) for img in gallery]
+    return _image_to_out(images[0]), [_image_to_out(img) for img in images]
 
-    gallery_out = [_image_to_out(img) for img in p.images]
-    return (gallery_out[0] if gallery_out else None), gallery_out
+
+def _split_images(p: Product) -> tuple[ProductImageOut | None, list[ProductImageOut]]:
+    """Featured image and gallery, falling back to a variation's own photos.
+
+    Products created before feature images existed have nothing flagged, so
+    the first gallery image stands in. A variable product photographed only
+    per-colour — nothing uploaded at the product level at all — falls back
+    further, to the first active variation that has images, in position
+    order. Without this, every card, grid and carousel showed a blank
+    placeholder for a product whose photos all live on its variations; only
+    the detail page looked right, because it resolves a variation on its own.
+    """
+    if p.images:
+        return _pick_featured(p.images)
+
+    for variation in p.variations:
+        if variation.is_active and variation.images:
+            return _pick_featured(variation.images)
+
+    return None, []
 
 
 def _derived(p: Product) -> tuple[float, PriceRange | None, int]:
