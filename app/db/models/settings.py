@@ -19,6 +19,11 @@ class StoreSettings(Base, UUIDMixin):
     contact_email: Mapped[str] = mapped_column(String(255), default="")
     currency: Mapped[str] = mapped_column(String(10), default="PKR")
     tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
+    # Flat delivery charge, waived once the cart reaches the threshold below.
+    shipping_cost: Mapped[float] = mapped_column(Numeric(10, 2), default=250)
+    free_shipping_threshold: Mapped[float] = mapped_column(
+        Numeric(10, 2), default=5000
+    )
     auto_fulfill_orders: Mapped[bool] = mapped_column(Boolean, default=False)
     low_stock_threshold: Mapped[int] = mapped_column(Integer, default=10)
     maintenance_mode: Mapped[bool] = mapped_column(Boolean, default=False)

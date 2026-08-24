@@ -36,6 +36,11 @@ class Order(Base, UUIDMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default=OrderStatus.PENDING.value)
     subtotal: Mapped[float] = mapped_column(Numeric(10, 2))
     shipping: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
+    # On (subtotal + shipping), at the store's tax_rate when the order was
+    # placed. Stored rather than recomputed so a later rate change does not
+    # rewrite the tax on an order already placed — same reasoning as why line
+    # items snapshot the product.
+    tax: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
     discount: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
     total: Mapped[float] = mapped_column(Numeric(10, 2))
     shipping_address: Mapped[dict] = mapped_column(JSON)

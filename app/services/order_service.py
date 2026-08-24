@@ -15,6 +15,7 @@ from app.db.models.product import Product
 from app.db.models.variation import ProductVariation, VariationAttributeValue
 from app.db.models.user import Address, User
 from app.utils.cache import cache_delete_pattern
+from app.services import settings_service
 from app.services.product_service import _pick_featured, _product_to_list_out
 from app.schemas.order import (
     OrderStatusLogEntry,
@@ -26,9 +27,6 @@ from app.schemas.order import (
 )
 from app.schemas.common import PaginatedResponse
 from app.tasks.queue import enqueue
-
-FREE_SHIPPING_THRESHOLD = 5000  # PKR
-SHIPPING_COST = 250  # PKR
 
 
 def _order_to_out(order: Order) -> OrderOut:
@@ -54,6 +52,7 @@ def _order_to_out(order: Order) -> OrderOut:
         status=order.status,
         subtotal=float(order.subtotal),
         shipping=float(order.shipping),
+        tax=float(order.tax),
         discount=float(order.discount),
         total=float(order.total),
         shipping_address=order.shipping_address,
@@ -62,6 +61,27 @@ def _order_to_out(order: Order) -> OrderOut:
         created_at=order.created_at,
         updated_at=order.updated_at,
     )
+
+
+async def _pricing(db: AsyncSession, subtotal: Decimal) -> tuple[Decimal, Decimal]:
+    """Shipping and tax for a cart, from live store settings.
+
+    Both used to be hardcoded constants with no admin control at all. Tax
+    applies to (subtotal + shipping) together, not the subtotal alone — the
+    store's own choice, not a platform default.
+    """
+    settings = await settings_service.get_or_create(db)
+
+    shipping = (
+        Decimal("0")
+        if subtotal >= Decimal(str(settings.free_shipping_threshold))
+        else Decimal(str(settings.shipping_cost))
+    )
+    taxable = subtotal + shipping
+    tax = (taxable * Decimal(str(settings.tax_rate)) / Decimal("100")).quantize(
+        Decimal("0.01")
+    )
+    return shipping, tax
 
 
 async def _reserve_line_item(db: AsyncSession, item_data) -> tuple[dict, Decimal]:
@@ -226,12 +246,7 @@ async def create_order(
         order_items.append(line)
         subtotal += line_total
 
-    # Calculate shipping
-    shipping = (
-        Decimal("0")
-        if subtotal >= FREE_SHIPPING_THRESHOLD
-        else Decimal(str(SHIPPING_COST))
-    )
+    shipping, tax = await _pricing(db, subtotal)
 
     # Apply discount
     discount = Decimal("0")
@@ -244,7 +259,7 @@ async def create_order(
         if discount_result:
             discount = Decimal(str(discount_result["amount"]))
 
-    total = subtotal + shipping - discount
+    total = subtotal + shipping + tax - discount
 
     # Generate order number
     order_number = await _generate_order_number(db)
@@ -256,6 +271,7 @@ async def create_order(
         status=OrderStatus.PENDING,
         subtotal=float(subtotal),
         shipping=float(shipping),
+        tax=float(tax),
         discount=float(discount),
         total=float(total),
         shipping_address=shipping_address,
@@ -314,12 +330,7 @@ async def create_checkout_order(
         order_items.append(line)
         subtotal += line_total
 
-    # Calculate shipping
-    shipping = (
-        Decimal("0")
-        if subtotal >= FREE_SHIPPING_THRESHOLD
-        else Decimal(str(SHIPPING_COST))
-    )
+    shipping, tax = await _pricing(db, subtotal)
 
     # Apply discount
     discount = Decimal("0")
@@ -332,7 +343,7 @@ async def create_checkout_order(
         if discount_result:
             discount = Decimal(str(discount_result["amount"]))
 
-    total = subtotal + shipping - discount
+    total = subtotal + shipping + tax - discount
 
     # Build shipping address (camelCase keys for frontend)
     shipping_address = {
@@ -353,6 +364,7 @@ async def create_checkout_order(
         status=OrderStatus.PENDING.value,
         subtotal=float(subtotal),
         shipping=float(shipping),
+        tax=float(tax),
         discount=float(discount),
         total=float(total),
         shipping_address=shipping_address,
@@ -561,6 +573,45 @@ async def cancel_order(
 
     await db.refresh(order)
     return _order_to_out(order)
+
+
+async def delete_order(
+    db: AsyncSession, order_id: str, redis: Redis | None = None, admin_id: str | None = None
+) -> None:
+    """Permanently remove an order and its items.
+
+    For cleaning up test orders, not a customer-facing action — there is no
+    equivalent route on the customer or public routers. Unlike cancelling,
+    this leaves no record behind; the activity log entry is written before
+    the delete so there is at least a trace of what was removed and by whom.
+
+    Stock is restored first, unless the order was already cancelled and so
+    already gave its stock back — otherwise deleting a pending test order
+    would permanently understate inventory.
+    """
+    result = await db.execute(
+        select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status != OrderStatus.CANCELLED.value:
+        await _restore_stock(db, order)
+
+    db.add(
+        ActivityLog(
+            user_id=admin_id,
+            action="order_deleted",
+            entity="order",
+            entity_id=str(order.id),
+            details={"orderNumber": order.order_number},
+        )
+    )
+
+    await db.delete(order)
+    await db.commit()
+    await _invalidate_product_cache(redis)
 
 
 async def get_order_admin(db: AsyncSession, order_id: str) -> OrderOut:
