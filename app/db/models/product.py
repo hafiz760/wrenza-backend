@@ -102,6 +102,11 @@ class Product(Base, UUIDMixin, TimestampMixin):
     canonical_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # Social share card; falls back to the feature image when unset
     og_image: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Optional "A+" marketing image shown below the tabs — one composition for
+    # desktop, one for mobile, plus the alt text that is the only part of it a
+    # search engine or a screen reader can read. JSON because the three are
+    # always written together and never filtered on. Null means no section.
+    a_plus_content: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Relationships (string refs to avoid circular imports)
     category: Mapped["Category | None"] = relationship(

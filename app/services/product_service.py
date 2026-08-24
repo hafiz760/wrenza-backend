@@ -190,6 +190,7 @@ def _product_to_full_out(
         images=gallery,
         category=p.category.slug if p.category else None,
         product_type=p.product_type,
+        a_plus_content=p.a_plus_content,
         dimensions=p.dimensions or {},
         care_instructions=p.care_instructions or [],
         tags=p.tags or [],
@@ -682,6 +683,11 @@ async def create_product(
         compare_at_price=data.compare_at_price,
         category_id=data.category_id,
         product_type=data.product_type,
+        a_plus_content=(
+            data.a_plus_content.model_dump(mode="json")
+            if data.a_plus_content
+            else None
+        ),
         dimensions=data.dimensions.model_dump(),
         care_instructions=data.care_instructions,
         tags=data.tags,
@@ -763,13 +769,22 @@ async def update_product(
             else update_data["dimensions"]
         )
 
-    # Not a Product column — replace the flagged ProductImage row instead
+    # Not a Product column — replace the flagged ProductImage row instead.
+    # Checked with `in`, not `is not None`: the dashboard clears the featured
+    # image by sending `featuredImage: null`, and `exclude_unset` keeps a key
+    # that was explicitly sent, so `update_data["featured_image"]` is `None`
+    # here on purpose. Popping with a `None` default and testing that against
+    # `is not None` could not tell "field omitted" from "field cleared", so a
+    # clear silently did nothing and the old featured image kept showing.
+    featured_image_sent = "featured_image" in update_data
     featured_data = update_data.pop("featured_image", None)
-    if featured_data is not None:
+    if featured_image_sent:
         for img in product.images:
             if img.is_featured:
                 await db.delete(img)
         await db.flush()
+
+    if featured_image_sent and featured_data is not None:
         # `exclude_unset` drops nested defaults too, so a client sending only
         # {url, alt} — which is all ImageKit gives us — arrives without
         # dimensions. They are optional metadata, not a reason to fail.
