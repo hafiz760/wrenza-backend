@@ -44,7 +44,7 @@ async def update_order_status(
     order_id: str, data: OrderStatusUpdate, admin: AdminUser, db: DbSession
 ):
     """Move the order through its lifecycle. Cancelling restores stock."""
-    return await order_service.update_order_status(db, order_id, data)
+    return await order_service.update_order_status(db, order_id, data, admin_id=admin.id)
 
 
 @router.post("/{order_id}/cancel")
@@ -52,4 +52,4 @@ async def cancel_order(
     order_id: str, admin: AdminUser, db: DbSession, redis: RedisClient
 ):
     """Cancel any order and return its units to stock."""
-    return await order_service.cancel_order(db, order_id, redis=redis)
+    return await order_service.cancel_order(db, order_id, admin_id=admin.id, redis=redis)

@@ -535,3 +535,33 @@ async def test_generate_backfills_missing_skus(client, admin_headers, setup):
     repaired = next(v for v in again.json() if v["id"] == target)
     assert repaired["sku"], "blank SKU should have been backfilled"
     assert repaired["sku"].startswith("BIFOLD-WALLET-")
+
+
+@pytest.mark.asyncio
+async def test_generated_variation_order_matches_term_position(
+    client, admin_headers, setup
+):
+    """The term order within an axis must come from `AttributeTerm.position`,
+    not from however SQLite happens to return an unordered join.
+
+    Regression: `pa.terms` had no `order_by`, so which colour ended up first
+    was undefined — observed to flip between Black and Tan depending on what
+    else had run in the same test session. Variation position order is what
+    the storefront card falls back to when a product has no photo of its own,
+    so nondeterminism here silently changes which colour represents a product.
+    """
+    response = await client.post(
+        f"/api/v1/admin/products/{setup['product_id']}/variations/generate",
+        headers=admin_headers,
+    )
+    variations = response.json()
+
+    # setup() creates Colour(Black, Tan) — Black first — and Hardware(Silver)
+    def colour_of(variation):
+        return next(
+            v["termValue"] for v in variation["values"] if v["attributeSlug"] == "colour"
+        )
+
+    colours = [colour_of(v) for v in variations]
+    assert colours[0] == "Black"
+    assert colours[1] == "Tan"
