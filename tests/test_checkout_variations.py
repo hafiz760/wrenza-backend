@@ -260,3 +260,80 @@ async def test_deactivated_variation_excluded_from_derived_values(
     row = next(p for p in listed.json()["items"] if p["id"] == pid)
     assert row["priceRange"] == {"min": 6000, "max": 6000}
     assert row["stock"] == 4
+
+
+# ── Order snapshot shows the variant actually bought ────────────
+
+
+@pytest.mark.asyncio
+async def test_order_snapshot_uses_the_purchased_variation_photo(
+    client, admin_headers, variable_product
+):
+    """Product has no photos at all, both variations do — the order must
+    show the one that was bought, not `_split_images`'s generic first-
+    variation fallback used for cards and listings.
+    """
+    black_id = variable_product["variations"][0]["id"]
+    tan_id = variable_product["variations"][1]["id"]
+    pid = variable_product["product_id"]
+
+    await client.post(
+        f"/api/v1/admin/products/{pid}/variations/{black_id}/images",
+        headers=admin_headers,
+        json={"url": "https://cdn.test/black.jpg", "alt": "Black", "isFeatured": True},
+    )
+    await client.post(
+        f"/api/v1/admin/products/{pid}/variations/{tan_id}/images",
+        headers=admin_headers,
+        json={"url": "https://cdn.test/tan.jpg", "alt": "Tan", "isFeatured": True},
+    )
+
+    checkout = await client.post(
+        "/api/v1/checkout",
+        json={
+            **ADDRESS,
+            "items": [{"productId": pid, "variationId": tan_id, "quantity": 1}],
+        },
+    )
+    assert checkout.status_code == 200, checkout.text
+
+    order = await client.get(
+        f"/api/v1/admin/orders/{checkout.json()['id']}", headers=admin_headers
+    )
+    snapshot = order.json()["items"][0]["product"]
+    assert snapshot["featuredImage"]["url"] == "https://cdn.test/tan.jpg"
+    assert snapshot["variation"]["attributes"]["Colour"] == "Tan"
+
+
+@pytest.mark.asyncio
+async def test_order_snapshot_falls_back_when_variation_has_no_photo(
+    client, admin_headers, variable_product
+):
+    """The purchased variation was never photographed — fall back to
+    whatever the generic listing logic already provides, rather than null."""
+    black_id = variable_product["variations"][0]["id"]
+    pid = variable_product["product_id"]
+
+    await client.post(
+        f"/api/v1/admin/products/{pid}/variations/{black_id}/images",
+        headers=admin_headers,
+        json={"url": "https://cdn.test/black.jpg", "alt": "Black", "isFeatured": True},
+    )
+
+    tan_id = variable_product["variations"][1]["id"]
+    checkout = await client.post(
+        "/api/v1/checkout",
+        json={
+            **ADDRESS,
+            "items": [{"productId": pid, "variationId": tan_id, "quantity": 1}],
+        },
+    )
+    assert checkout.status_code == 200, checkout.text
+
+    order = await client.get(
+        f"/api/v1/admin/orders/{checkout.json()['id']}", headers=admin_headers
+    )
+    snapshot = order.json()["items"][0]["product"]
+    # Falls back to Black's photo via the generic listing fallback, rather
+    # than leaving the order with no image at all.
+    assert snapshot["featuredImage"]["url"] == "https://cdn.test/black.jpg"

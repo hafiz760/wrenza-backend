@@ -14,7 +14,7 @@ from app.db.models.product import Product
 from app.db.models.variation import ProductVariation, VariationAttributeValue
 from app.db.models.user import Address
 from app.utils.cache import cache_delete_pattern
-from app.services.product_service import _product_to_list_out
+from app.services.product_service import _pick_featured, _product_to_list_out
 from app.schemas.order import (
     CheckoutRequest,
     OrderCreate,
@@ -141,6 +141,21 @@ async def _reserve_line_item(db: AsyncSession, item_data) -> tuple[dict, Decimal
             "sku": stock_holder.sku,
             "attributes": {t.attribute.name: t.value for t in terms.scalars().all()},
         }
+
+        # The purchased variation's own photo, not a bare product image or
+        # `_split_images`'s generic "first variation" fallback. A customer who
+        # bought Tan must not see Blue's photo on their order just because
+        # Blue happens to sit first in the variation list.
+        if stock_holder.images:
+            v_featured, v_gallery = _pick_featured(stock_holder.images)
+            snapshot["featuredImage"] = (
+                v_featured.model_dump(mode="json", by_alias=True)
+                if v_featured
+                else None
+            )
+            snapshot["images"] = [
+                img.model_dump(mode="json", by_alias=True) for img in v_gallery
+            ]
 
     stock_holder.stock -= item_data.quantity
 
