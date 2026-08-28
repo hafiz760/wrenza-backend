@@ -468,8 +468,12 @@ async def create_safepay_checkout_order(
     checkout_url = safepay_service.build_checkout_url(
         tracker=tracker,
         tbt=tbt,
-        redirect_url=f"{frontend_url}/checkout/success?order={order.order_number}",
-        cancel_url=f"{frontend_url}/checkout/cancel?order={order.order_number}",
+        # Path segment, not a query param — Safepay appends its own
+        # `?tracker=...` to whatever URL it's given without checking for an
+        # existing `?`, so `?order=...` here collided with it and produced
+        # a malformed double-`?` URL that 404'd in production.
+        redirect_url=f"{frontend_url}/checkout/success/{order.order_number}",
+        cancel_url=f"{frontend_url}/checkout/cancel/{order.order_number}",
     )
 
     return _order_to_out(order), checkout_url
