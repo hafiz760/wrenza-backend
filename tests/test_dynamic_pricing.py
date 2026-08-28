@@ -72,10 +72,13 @@ async def test_public_settings_exposes_pricing_only(client, admin_headers):
     assert body["taxRate"] == 5
     assert "shippingCost" in body
     assert "freeShippingThreshold" in body
+    # `maintenanceMode` is deliberately here — the storefront's root layout
+    # reads it on every request to decide whether to show the coming-soon
+    # page, which used to be a build-time env var needing a rebuild to flip.
+    assert "maintenanceMode" in body
     # Nothing an anonymous visitor has no business seeing.
     assert "storeName" not in body
     assert "contactEmail" not in body
-    assert "maintenanceMode" not in body
 
 
 @pytest.mark.asyncio
@@ -174,3 +177,25 @@ async def test_tax_defaults_to_zero_when_unset(client, admin_headers):
         json={**ADDRESS, "items": [{"productId": pid, "quantity": 1}]},
     )
     assert checkout.json()["tax"] == 0
+
+
+# ── Maintenance mode ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_maintenance_mode_defaults_to_off(client):
+    response = await client.get("/api/v1/settings")
+    assert response.json()["maintenanceMode"] is False
+
+
+@pytest.mark.asyncio
+async def test_maintenance_mode_reflects_the_admin_toggle(client, admin_headers):
+    await _set_settings(client, admin_headers, maintenanceMode=True)
+
+    response = await client.get("/api/v1/settings")
+    assert response.status_code == 200, response.text
+    assert response.json()["maintenanceMode"] is True
+
+    await _set_settings(client, admin_headers, maintenanceMode=False)
+    response = await client.get("/api/v1/settings")
+    assert response.json()["maintenanceMode"] is False
