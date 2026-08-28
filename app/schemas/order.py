@@ -124,6 +124,7 @@ class OrderOut(CamelModel):
     total: float
     shipping_address: dict
     payment_method: str
+    payment_status: str
     tracking_number: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -135,6 +136,14 @@ class OrderOut(CamelModel):
 class OrderStatusUpdate(CamelModel):
     status: Annotated[str, Field(min_length=1, max_length=20)]
     tracking_number: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+
+
+class SafepayInitiateOut(CamelModel):
+    """What the storefront needs to send the customer on to Safepay."""
+
+    order_id: str
+    order_number: str
+    checkout_url: str
 
 
 # Rebuild for forward ref

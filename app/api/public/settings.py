@@ -15,7 +15,9 @@ class PublicSettingsOut(CamelModel):
     business. `maintenance_mode` earns its place here: the storefront's own
     root layout reads it on every request to decide whether to show the
     coming-soon page, replacing what used to be a build-time env var that
-    needed a rebuild to flip.
+    needed a rebuild to flip. `safepay_enabled` is the same idea for
+    checkout — the admin's kill switch for online payments, read before
+    offering "pay online" alongside Cash on Delivery.
     """
 
     currency: str
@@ -23,6 +25,7 @@ class PublicSettingsOut(CamelModel):
     shipping_cost: float
     free_shipping_threshold: float
     maintenance_mode: bool
+    safepay_enabled: bool
 
 
 @router.get("", response_model=PublicSettingsOut)
@@ -34,4 +37,5 @@ async def get_public_settings(db: DbSession):
         shipping_cost=float(s.shipping_cost),
         free_shipping_threshold=float(s.free_shipping_threshold),
         maintenance_mode=s.maintenance_mode,
+        safepay_enabled=s.safepay_enabled,
     )
