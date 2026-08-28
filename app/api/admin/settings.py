@@ -21,6 +21,7 @@ class StoreSettingsOut(CamelModel):
     auto_fulfill_orders: bool
     low_stock_threshold: int
     maintenance_mode: bool
+    safepay_enabled: bool
 
 
 class StoreSettingsUpdate(CamelModel):
@@ -33,6 +34,7 @@ class StoreSettingsUpdate(CamelModel):
     auto_fulfill_orders: bool | None = None
     low_stock_threshold: Annotated[int, Field(ge=0)] | None = None
     maintenance_mode: bool | None = None
+    safepay_enabled: bool | None = None
 
 
 def _to_out(s: StoreSettings) -> StoreSettingsOut:
@@ -46,6 +48,7 @@ def _to_out(s: StoreSettings) -> StoreSettingsOut:
         auto_fulfill_orders=s.auto_fulfill_orders,
         low_stock_threshold=s.low_stock_threshold,
         maintenance_mode=s.maintenance_mode,
+        safepay_enabled=s.safepay_enabled,
     )
 
 

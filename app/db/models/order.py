@@ -26,6 +26,18 @@ class OrderStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+class PaymentStatus(str, enum.Enum):
+    """Independent of OrderStatus on purpose — fulfillment and money are
+    separate concerns. A Safepay order can be `paid` while its fulfillment
+    `status` is still `pending`; admin still reviews and confirms it like any
+    other order, they just know it's already been paid for."""
+
+    UNPAID = "unpaid"
+    PAID = "paid"
+    FAILED = "failed"
+    REFUNDED = "refunded"
+
+
 class Order(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "orders"
 
@@ -45,6 +57,13 @@ class Order(Base, UUIDMixin, TimestampMixin):
     total: Mapped[float] = mapped_column(Numeric(10, 2))
     shipping_address: Mapped[dict] = mapped_column(JSON)
     payment_method: Mapped[str] = mapped_column(String(50), default="Cash on Delivery")
+    payment_status: Mapped[str] = mapped_column(
+        String(20), default=PaymentStatus.UNPAID.value
+    )
+    # Safepay's tracker token (e.g. "track_..."). How the webhook finds its
+    # way back to this order — set when a Safepay checkout session is
+    # created, null for Cash on Delivery orders.
+    payment_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     discount_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     tracking_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)

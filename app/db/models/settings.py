@@ -27,6 +27,11 @@ class StoreSettings(Base, UUIDMixin):
     auto_fulfill_orders: Mapped[bool] = mapped_column(Boolean, default=False)
     low_stock_threshold: Mapped[int] = mapped_column(Integer, default=10)
     maintenance_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Admin-facing kill switch, independent of whether SAFEPAY_* credentials
+    # are configured on the server — lets the store take online payments
+    # down (e.g. a Safepay outage) without touching env vars or redeploying.
+    # The storefront only offers "pay online" at checkout when this is on.
+    safepay_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

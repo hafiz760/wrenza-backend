@@ -94,6 +94,7 @@ def create_app() -> FastAPI:
     from app.api.public.testimonials import router as public_testimonials
     from app.api.public.contact import router as public_contact
     from app.api.public.checkout import router as public_checkout
+    from app.api.public.webhooks import router as public_webhooks
 
     app.include_router(public_products, prefix="/api/v1")
     app.include_router(public_categories, prefix="/api/v1")
@@ -103,6 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(public_testimonials, prefix="/api/v1")
     app.include_router(public_contact, prefix="/api/v1")
     app.include_router(public_checkout, prefix="/api/v1")
+    app.include_router(public_webhooks, prefix="/api/v1")
 
     # Auth routes
     from app.api.auth.router import router as auth_router

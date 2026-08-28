@@ -76,6 +76,9 @@ async def test_public_settings_exposes_pricing_only(client, admin_headers):
     # reads it on every request to decide whether to show the coming-soon
     # page, which used to be a build-time env var needing a rebuild to flip.
     assert "maintenanceMode" in body
+    # Same reasoning for `safepayEnabled` — checkout needs to know whether
+    # to offer "pay online" before the customer even opens the form.
+    assert "safepayEnabled" in body
     # Nothing an anonymous visitor has no business seeing.
     assert "storeName" not in body
     assert "contactEmail" not in body

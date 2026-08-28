@@ -8,8 +8,9 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.db.models.activity_log import ActivityLog
-from app.db.models.order import Order, OrderItem, OrderStatus
+from app.db.models.order import Order, OrderItem, OrderStatus, PaymentStatus
 from app.db.models.attribute import AttributeTerm
 from app.db.models.product import Product
 from app.db.models.variation import ProductVariation, VariationAttributeValue
@@ -57,6 +58,7 @@ def _order_to_out(order: Order) -> OrderOut:
         total=float(order.total),
         shipping_address=order.shipping_address,
         payment_method=order.payment_method,
+        payment_status=order.payment_status,
         tracking_number=order.tracking_number,
         created_at=order.created_at,
         updated_at=order.updated_at,
@@ -312,16 +314,17 @@ async def create_order(
     return _order_to_out(order)
 
 
-async def create_checkout_order(
+async def _build_order(
     db: AsyncSession,
     data: CheckoutRequest,
-    user_id: str | None = None,
-    redis: Redis | None = None,
-) -> OrderOut:
-    """Unified checkout for both guest and authenticated users.
-    Matches the frontend checkout form: email, phone, name, address, items."""
+    user_id: str | None,
+    payment_method: str,
+) -> Order:
+    """Shared by every checkout path — Cash on Delivery and Safepay both
+    reserve stock and price the order identically. Flushed but not
+    committed: the caller decides when this becomes durable, since the
+    Safepay path needs the order's id before it can even talk to Safepay."""
 
-    # Validate products and calculate subtotal
     subtotal = Decimal("0")
     order_items = []
 
@@ -332,7 +335,6 @@ async def create_checkout_order(
 
     shipping, tax = await _pricing(db, subtotal)
 
-    # Apply discount
     discount = Decimal("0")
     if data.discount_code:
         from app.services.promotion_service import validate_discount
@@ -368,7 +370,7 @@ async def create_checkout_order(
         discount=float(discount),
         total=float(total),
         shipping_address=shipping_address,
-        payment_method="Cash on Delivery",
+        payment_method=payment_method,
         discount_code=data.discount_code,
         phone=data.phone,
         email=data.email,
@@ -391,18 +393,116 @@ async def create_checkout_order(
             )
         )
 
+    return order
+
+
+async def _refetch(db: AsyncSession, order_id) -> Order:
+    result = await db.execute(
+        select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
+    )
+    return result.scalar_one()
+
+
+async def create_checkout_order(
+    db: AsyncSession,
+    data: CheckoutRequest,
+    user_id: str | None = None,
+    redis: Redis | None = None,
+) -> OrderOut:
+    """Unified Cash on Delivery checkout for both guest and authenticated
+    users. Matches the frontend checkout form: email, phone, name, address,
+    items."""
+
+    order = await _build_order(db, data, user_id, "Cash on Delivery")
     await db.commit()
     await _invalidate_product_cache(redis)
 
     await enqueue("send_order_confirmation", str(order.id))
 
-    # Re-fetch with relationships
-    result = await db.execute(
-        select(Order).options(selectinload(Order.items)).where(Order.id == order.id)
-    )
-    order = result.scalar_one()
-
+    order = await _refetch(db, order.id)
     return _order_to_out(order)
+
+
+async def create_safepay_checkout_order(
+    db: AsyncSession,
+    data: CheckoutRequest,
+    user_id: str | None = None,
+    redis: Redis | None = None,
+) -> tuple[OrderOut, str]:
+    """Reserves stock and prices the order exactly like Cash on Delivery,
+    then opens a Safepay payment session for it and returns the hosted
+    checkout URL to redirect the customer to.
+
+    Commits immediately (as `unpaid`) so the webhook has something to find
+    when Safepay calls back, possibly minutes later in a separate request —
+    but does NOT send the order-confirmation email yet. `send_safepay_paid`
+    fires that once the webhook confirms the charge; an abandoned checkout
+    must not look like a placed order to the customer.
+    """
+    from app.services import safepay_service
+
+    store_settings = await settings_service.get_or_create(db)
+    if not store_settings.safepay_enabled:
+        raise HTTPException(status_code=403, detail="Online payment is currently unavailable.")
+
+    order = await _build_order(db, data, user_id, "Safepay")
+
+    try:
+        tracker = await safepay_service.create_tracker(
+            float(order.total), str(order.id), order.order_number
+        )
+        tbt = await safepay_service.create_passport_token()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=502, detail="Could not start payment session. Please try again."
+        ) from exc
+
+    order.payment_reference = tracker
+    await db.commit()
+    await _invalidate_product_cache(redis)
+
+    order = await _refetch(db, order.id)
+
+    frontend_url = get_settings().FRONTEND_URL.rstrip("/")
+    checkout_url = safepay_service.build_checkout_url(
+        tracker=tracker,
+        tbt=tbt,
+        redirect_url=f"{frontend_url}/checkout/success?order={order.order_number}",
+        cancel_url=f"{frontend_url}/checkout/cancel?order={order.order_number}",
+    )
+
+    return _order_to_out(order), checkout_url
+
+
+async def mark_safepay_payment(
+    db: AsyncSession, tracker: str, succeeded: bool
+) -> Order | None:
+    """Applies a Safepay webhook outcome to the order it belongs to.
+
+    Idempotent by design — Safepay retries a webhook until it gets a 200, so
+    this may run more than once for the same event. Only touches an order
+    still `unpaid`; a second `payment.succeeded` for an already-paid order,
+    or a late `payment.failed` after it already succeeded, is a no-op rather
+    than a state flip.
+    """
+    order = await db.scalar(
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(Order.payment_reference == tracker)
+    )
+    if order is None or order.payment_status != PaymentStatus.UNPAID.value:
+        return order
+
+    order.payment_status = (
+        PaymentStatus.PAID.value if succeeded else PaymentStatus.FAILED.value
+    )
+    await db.commit()
+
+    if succeeded:
+        await enqueue("send_order_confirmation", str(order.id))
+
+    return await _refetch(db, order.id)
 
 
 async def get_user_orders(db: AsyncSession, user_id: str) -> list[OrderOut]:

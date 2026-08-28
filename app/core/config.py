@@ -102,6 +102,19 @@ class Settings(BaseSettings):
     EMAIL_LOGO_URL: str = ""
     EMAIL_LOGO_WIDTH: int = 132
 
+    # Safepay payment gateway. "sandbox" and "production" point at different
+    # hosts for both the API and the hosted checkout page — see
+    # app/services/safepay_service.py for the exact split. Keys come from the
+    # Safepay dashboard's Developer tab.
+    SAFEPAY_PUBLIC_KEY: str = ""
+    SAFEPAY_SECRET_KEY: str = ""
+    SAFEPAY_WEBHOOK_SECRET: str = ""
+    SAFEPAY_ENVIRONMENT: str = "sandbox"
+
+    @property
+    def safepay_enabled(self) -> bool:
+        return bool(self.SAFEPAY_PUBLIC_KEY and self.SAFEPAY_SECRET_KEY)
+
     @property
     def email_enabled(self) -> bool:
         """False when credentials are absent, e.g. in tests or a fresh clone.
