@@ -250,6 +250,7 @@ async def get_product_attributes(
 
     term_ids = [str(t.term_id) for pa in rows for t in pa.terms]
     terms = await _term_lookup(db, term_ids)
+    term_rank = await _term_rank_by_variation_position(db, product_id)
 
     out = []
     for pa in rows:
@@ -258,6 +259,13 @@ async def get_product_attributes(
         ]
         if not pa_terms:
             continue
+        # Which term shows first — the swatch order, and the storefront's
+        # default-selected colour — follows variation position rather than
+        # whatever order terms were assigned in. Reordering variation rows
+        # (the admin's "make Tan primary instead of Blue" lever) is then the
+        # one thing that controls it, consistently with `_split_images`'s
+        # card-image fallback, which already walks variations the same way.
+        pa_terms.sort(key=lambda t: term_rank.get(str(t.id), len(term_rank)))
         out.append(
             ProductAttributeOut(
                 attribute_id=str(pa.attribute_id),
@@ -269,6 +277,28 @@ async def get_product_attributes(
             )
         )
     return out
+
+
+async def _term_rank_by_variation_position(
+    db: AsyncSession, product_id: str
+) -> dict[str, int]:
+    """term_id → the lowest-position variation that uses it.
+
+    A term not yet used by any generated variation (e.g. before "Generate
+    variations" has run) has no entry, and callers fall back to keeping its
+    existing relative order.
+    """
+    result = await db.execute(
+        select(ProductVariation)
+        .options(selectinload(ProductVariation.values))
+        .where(ProductVariation.product_id == product_id)
+        .order_by(ProductVariation.position)
+    )
+    rank: dict[str, int] = {}
+    for variation in result.scalars().all():
+        for value in variation.values:
+            rank.setdefault(str(value.term_id), variation.position)
+    return rank
 
 
 # ── Variations ──────────────────────────────────────────────────

@@ -10,7 +10,12 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models.attribute import Attribute, AttributeTerm
 from app.db.models.product import Product, ProductImage, Category
-from app.db.models.variation import ProductAttribute, ProductAttributeTerm
+from app.db.models.variation import (
+    ProductAttribute,
+    ProductAttributeTerm,
+    ProductVariation,
+    VariationAttributeValue,
+)
 from app.schemas.product import (
     PriceRange,
     ProductSwatchOut,
@@ -126,6 +131,8 @@ async def load_swatches(
     if not products:
         return {}
 
+    product_ids = [str(p.id) for p in products]
+
     rows = await db.execute(
         select(
             ProductAttribute.product_id,
@@ -139,9 +146,31 @@ async def load_swatches(
             ProductAttributeTerm.product_attribute_id == ProductAttribute.id,
         )
         .join(AttributeTerm, AttributeTerm.id == ProductAttributeTerm.term_id)
-        .where(ProductAttribute.product_id.in_([str(p.id) for p in products]))
+        .where(ProductAttribute.product_id.in_(product_ids))
         .order_by(AttributeTerm.position, AttributeTerm.value)
     )
+
+    # Same reasoning as variation_service.get_product_attributes: which dot
+    # shows first (and so reads as the product's "main" colour) follows
+    # variation position per product, not the global term catalog — one
+    # batched query rather than one per product, since a card grid renders
+    # many products at once.
+    rank_rows = await db.execute(
+        select(
+            ProductVariation.product_id,
+            VariationAttributeValue.term_id,
+            func.min(ProductVariation.position),
+        )
+        .join(
+            VariationAttributeValue,
+            VariationAttributeValue.variation_id == ProductVariation.id,
+        )
+        .where(ProductVariation.product_id.in_(product_ids))
+        .group_by(ProductVariation.product_id, VariationAttributeValue.term_id)
+    )
+    term_rank: dict[tuple[str, str], int] = {
+        (str(pid), str(tid)): position for pid, tid, position in rank_rows.all()
+    }
 
     swatches: dict[str, list[ProductSwatchOut]] = {}
     for product_id, term_id, value, slug, meta in rows.all():
@@ -154,6 +183,11 @@ async def load_swatches(
             ProductSwatchOut(
                 term_id=str(term_id), value=value, slug=slug, hex=hex_value
             )
+        )
+
+    for pid, items in swatches.items():
+        items.sort(
+            key=lambda s: term_rank.get((pid, s.term_id), len(items) + 1)
         )
 
     return swatches
