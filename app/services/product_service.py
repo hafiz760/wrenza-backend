@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from redis.asyncio import Redis
-from sqlalchemy import select, desc, asc, func, or_
+from sqlalchemy import select, desc, asc, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -276,6 +276,7 @@ async def list_products(
     product_type: str | None = None,
     attribute_terms: list[str] | None = None,
     ids: list[str] | None = None,
+    on_sale: bool | None = None,
     sort_by: str | None = None,
     search: str | None = None,
     page: int = 1,
@@ -293,6 +294,7 @@ async def list_products(
             "product_type": product_type,
             "attribute_terms": sorted(attribute_terms) if attribute_terms else None,
             "ids": ids,
+            "on_sale": on_sale,
             "sort_by": sort_by,
             "search": search,
             "page": page,
@@ -357,6 +359,30 @@ async def list_products(
                 Product.name.ilike(f"%{search}%"),
                 Product.description.ilike(f"%{search}%"),
                 Product.tags.cast(str).ilike(f"%{search}%"),
+            )
+        )
+    if on_sale:
+        # A simple product is on sale by its own price fields; a variable
+        # one is on sale if any active variation is, since the product's own
+        # price/compare_at_price columns aren't meaningful for that kind —
+        # `_derived` already treats variation prices as the source of truth.
+        variation_on_sale = (
+            select(ProductVariation.id)
+            .where(
+                ProductVariation.product_id == Product.id,
+                ProductVariation.is_active.is_(True),
+                ProductVariation.compare_at_price.is_not(None),
+                ProductVariation.compare_at_price > ProductVariation.price,
+            )
+            .exists()
+        )
+        query = query.where(
+            or_(
+                and_(
+                    Product.compare_at_price.is_not(None),
+                    Product.compare_at_price > Product.price,
+                ),
+                variation_on_sale,
             )
         )
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.core.deps import AdminUser, DbSession
+from app.core.deps import AdminUser, DbSession, RedisClient
 from app.schemas.common import MessageResponse
 from app.schemas.variation import (
     ProductAttributeOut,
@@ -21,15 +21,21 @@ async def get_attributes(product_id: str, db: DbSession, admin: AdminUser):
 
 @router.put("/attributes", response_model=list[ProductAttributeOut])
 async def set_attributes(
-    product_id: str, data: ProductAttributesUpdate, admin: AdminUser, db: DbSession
+    product_id: str,
+    data: ProductAttributesUpdate,
+    admin: AdminUser,
+    db: DbSession,
+    redis: RedisClient,
 ):
-    return await variation_service.set_product_attributes(db, product_id, data)
+    return await variation_service.set_product_attributes(db, product_id, data, redis)
 
 
 @router.post("/variations/generate", response_model=list[VariationOut])
-async def generate_variations(product_id: str, admin: AdminUser, db: DbSession):
+async def generate_variations(
+    product_id: str, admin: AdminUser, db: DbSession, redis: RedisClient
+):
     """Create every missing combination of the variation-axis terms."""
-    return await variation_service.generate_variations(db, product_id)
+    return await variation_service.generate_variations(db, product_id, redis)
 
 
 @router.get("/variations", response_model=list[VariationOut])
@@ -39,16 +45,24 @@ async def list_variations(product_id: str, db: DbSession, admin: AdminUser):
 
 @router.put("/variations", response_model=list[VariationOut])
 async def bulk_update_variations(
-    product_id: str, data: VariationBulkUpdate, admin: AdminUser, db: DbSession
+    product_id: str,
+    data: VariationBulkUpdate,
+    admin: AdminUser,
+    db: DbSession,
+    redis: RedisClient,
 ):
-    return await variation_service.bulk_update_variations(db, product_id, data)
+    return await variation_service.bulk_update_variations(db, product_id, data, redis)
 
 
 @router.delete("/variations/{variation_id}", response_model=MessageResponse)
 async def delete_variation(
-    product_id: str, variation_id: str, admin: AdminUser, db: DbSession
+    product_id: str,
+    variation_id: str,
+    admin: AdminUser,
+    db: DbSession,
+    redis: RedisClient,
 ):
-    await variation_service.delete_variation(db, product_id, variation_id)
+    await variation_service.delete_variation(db, product_id, variation_id, redis)
     return MessageResponse(message="Variation deleted")
 
 
@@ -59,9 +73,10 @@ async def add_variation_image(
     data: VariationImageCreate,
     admin: AdminUser,
     db: DbSession,
+    redis: RedisClient,
 ):
     return await variation_service.add_variation_image(
-        db, product_id, variation_id, data
+        db, product_id, variation_id, data, redis
     )
 
 
@@ -74,8 +89,9 @@ async def delete_variation_image(
     image_id: str,
     admin: AdminUser,
     db: DbSession,
+    redis: RedisClient,
 ):
     await variation_service.delete_variation_image(
-        db, product_id, variation_id, image_id
+        db, product_id, variation_id, image_id, redis
     )
     return MessageResponse(message="Image deleted")
