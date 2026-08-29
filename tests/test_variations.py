@@ -565,3 +565,55 @@ async def test_generated_variation_order_matches_term_position(
     colours = [colour_of(v) for v in variations]
     assert colours[0] == "Black"
     assert colours[1] == "Tan"
+
+
+@pytest.mark.asyncio
+async def test_reordering_variations_reorders_the_attribute_terms(
+    client, admin_headers, setup
+):
+    """Swatch order and the storefront's default-selected colour both come
+    from `attribute.terms` order (see variation-helpers.ts on the storefront),
+    which in turn has to follow variation position — reordering variation
+    rows in the dashboard is the one lever an admin has to say "Tan is the
+    primary colour for this product, not Black"."""
+    pid = setup["product_id"]
+    generated = (
+        await client.post(
+            f"/api/v1/admin/products/{pid}/variations/generate",
+            headers=admin_headers,
+        )
+    ).json()
+
+    def colour_of(variation):
+        return next(
+            v["termValue"] for v in variation["values"] if v["attributeSlug"] == "colour"
+        )
+
+    black = next(v for v in generated if colour_of(v) == "Black")
+    tan = next(v for v in generated if colour_of(v) == "Tan")
+    assert black["position"] < tan["position"]
+
+    before = await client.get(
+        f"/api/v1/admin/products/{pid}/attributes", headers=admin_headers
+    )
+    colour_axis = next(a for a in before.json() if a["attributeSlug"] == "colour")
+    assert [t["termValue"] for t in colour_axis["terms"]] == ["Black", "Tan"]
+
+    # Swap positions — Tan should now lead.
+    swap = await client.put(
+        f"/api/v1/admin/products/{pid}/variations",
+        headers=admin_headers,
+        json={
+            "variations": [
+                {"id": black["id"], "position": tan["position"]},
+                {"id": tan["id"], "position": black["position"]},
+            ]
+        },
+    )
+    assert swap.status_code == 200, swap.text
+
+    after = await client.get(
+        f"/api/v1/admin/products/{pid}/attributes", headers=admin_headers
+    )
+    colour_axis_after = next(a for a in after.json() if a["attributeSlug"] == "colour")
+    assert [t["termValue"] for t in colour_axis_after["terms"]] == ["Tan", "Black"]
