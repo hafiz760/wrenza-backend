@@ -26,6 +26,11 @@ async def list_products(
     ids: list[str] | None = Query(
         None, description="Return only these product ids, repeatable."
     ),
+    onSale: bool | None = Query(
+        None,
+        alias="onSale",
+        description="Only products currently discounted below their compare-at price.",
+    ),
     sortBy: str | None = Query(None, alias="sortBy"),
     search: str | None = None,
     page: int = Query(1, ge=1),
@@ -40,6 +45,7 @@ async def list_products(
         product_type=productType,
         attribute_terms=attrs,
         ids=ids,
+        on_sale=onSale,
         sort_by=sortBy,
         search=search,
         page=page,

@@ -617,3 +617,85 @@ async def test_reordering_variations_reorders_the_attribute_terms(
     )
     colour_axis_after = next(a for a in after.json() if a["attributeSlug"] == "colour")
     assert [t["termValue"] for t in colour_axis_after["terms"]] == ["Tan", "Black"]
+
+
+@pytest.mark.asyncio
+async def test_reordering_variations_reorders_the_card_swatch_dots(
+    client, admin_headers
+):
+    """`load_swatches` is a separate, batched query from `get_product_attributes`
+    (a product-grid page can't afford one query per card) — same fix, but it
+    has its own JOIN and needed its own regression test."""
+    product = await client.post(
+        "/api/v1/admin/products",
+        headers=admin_headers,
+        json={
+            "name": "Card Holder",
+            "description": "A card holder.",
+            "kind": "variable",
+            "price": 1500,
+        },
+    )
+    product_id = product.json()["id"]
+
+    attr = await client.post(
+        "/api/v1/admin/attributes", headers=admin_headers, json={"name": "Colour"}
+    )
+    attr_id = attr.json()["id"]
+    blue = await client.post(
+        f"/api/v1/admin/attributes/{attr_id}/terms",
+        headers=admin_headers,
+        json={"value": "Blue", "meta": {"hex": "#0000FF"}},
+    )
+    tan = await client.post(
+        f"/api/v1/admin/attributes/{attr_id}/terms",
+        headers=admin_headers,
+        json={"value": "Tan", "meta": {"hex": "#D2B48C"}},
+    )
+
+    await client.put(
+        f"/api/v1/admin/products/{product_id}/attributes",
+        headers=admin_headers,
+        json={
+            "attributes": [
+                {
+                    "attributeId": attr_id,
+                    "termIds": [blue.json()["id"], tan.json()["id"]],
+                }
+            ]
+        },
+    )
+    generated = (
+        await client.post(
+            f"/api/v1/admin/products/{product_id}/variations/generate",
+            headers=admin_headers,
+        )
+    ).json()
+
+    def colour_of(v):
+        return v["values"][0]["termValue"]
+
+    blue_var = next(v for v in generated if colour_of(v) == "Blue")
+    tan_var = next(v for v in generated if colour_of(v) == "Tan")
+    assert blue_var["position"] < tan_var["position"]
+
+    before = await client.get(f"/api/v1/products?ids={product_id}")
+    assert [
+        s["value"] for s in before.json()["items"][0]["swatches"]
+    ] == ["Blue", "Tan"]
+
+    await client.put(
+        f"/api/v1/admin/products/{product_id}/variations",
+        headers=admin_headers,
+        json={
+            "variations": [
+                {"id": blue_var["id"], "position": tan_var["position"]},
+                {"id": tan_var["id"], "position": blue_var["position"]},
+            ]
+        },
+    )
+
+    after = await client.get(f"/api/v1/products?ids={product_id}")
+    assert [
+        s["value"] for s in after.json()["items"][0]["swatches"]
+    ] == ["Tan", "Blue"]

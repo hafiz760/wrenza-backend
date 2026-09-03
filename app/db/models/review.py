@@ -58,6 +58,11 @@ class Testimonial(Base, UUIDMixin):
     avatar: Mapped[str | None] = mapped_column(String(500), nullable=True)
     comment: Mapped[str] = mapped_column(Text)
     rating: Mapped[int] = mapped_column(Integer)
+    # Lifestyle photo shown beside the quote on the home page carousel — the
+    # storefront reserves that layout slot whether or not this is set, so an
+    # unset one renders as an empty panel rather than collapsing away.
+    image: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_verified_buyer: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

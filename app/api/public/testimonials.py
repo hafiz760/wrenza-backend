@@ -20,6 +20,8 @@ async def list_testimonials(db: DbSession):
             "avatar": t.avatar,
             "comment": t.comment,
             "rating": t.rating,
+            "image": t.image,
+            "isVerifiedBuyer": t.is_verified_buyer,
         }
         for t in result.scalars().all()
     ]

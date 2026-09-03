@@ -1,6 +1,7 @@
 from itertools import product as cartesian
 
 from fastapi import HTTPException
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,6 +15,7 @@ from app.db.models.variation import (
     VariationAttributeValue,
 )
 from app.schemas.image import ProductImageOut
+from app.utils.cache import cache_delete_pattern
 from app.utils.slug import generate_slug
 from app.schemas.variation import (
     ProductAttributeOut,
@@ -136,7 +138,10 @@ async def _attribute_ids_in_use(db: AsyncSession, product_id: str) -> set[str]:
 
 
 async def set_product_attributes(
-    db: AsyncSession, product_id: str, data: ProductAttributesUpdate
+    db: AsyncSession,
+    product_id: str,
+    data: ProductAttributesUpdate,
+    redis: Redis | None = None,
 ) -> list[ProductAttributeOut]:
     """Replace the product's attribute selection.
 
@@ -233,6 +238,8 @@ async def set_product_attributes(
             db.add(ProductAttributeTerm(product_attribute_id=pa.id, term_id=term_id))
 
     await db.commit()
+    if redis:
+        await cache_delete_pattern(redis, "products:*")
     return await get_product_attributes(db, product_id)
 
 
@@ -337,7 +344,7 @@ def _variation_sku(stem: str, term_slugs: list[str], taken: set[str]) -> str:
 
 
 async def generate_variations(
-    db: AsyncSession, product_id: str
+    db: AsyncSession, product_id: str, redis: Redis | None = None
 ) -> list[VariationOut]:
     """Create the cartesian product of the variation-axis terms.
 
@@ -460,6 +467,8 @@ async def generate_variations(
             )
 
     await db.commit()
+    if redis:
+        await cache_delete_pattern(redis, "products:*")
     return await _load_variations(db, product_id)
 
 
@@ -476,7 +485,10 @@ async def list_variations(db: AsyncSession, product_id: str) -> list[VariationOu
 
 
 async def bulk_update_variations(
-    db: AsyncSession, product_id: str, data: VariationBulkUpdate
+    db: AsyncSession,
+    product_id: str,
+    data: VariationBulkUpdate,
+    redis: Redis | None = None,
 ) -> list[VariationOut]:
     await _get_product_or_404(db, product_id)
 
@@ -503,11 +515,13 @@ async def bulk_update_variations(
                 setattr(variation, key, value)
 
     await db.commit()
+    if redis:
+        await cache_delete_pattern(redis, "products:*")
     return await _load_variations(db, product_id)
 
 
 async def delete_variation(
-    db: AsyncSession, product_id: str, variation_id: str
+    db: AsyncSession, product_id: str, variation_id: str, redis: Redis | None = None
 ) -> None:
     variation = await db.scalar(
         select(ProductVariation).where(
@@ -520,10 +534,16 @@ async def delete_variation(
 
     await db.delete(variation)
     await db.commit()
+    if redis:
+        await cache_delete_pattern(redis, "products:*")
 
 
 async def add_variation_image(
-    db: AsyncSession, product_id: str, variation_id: str, data: VariationImageCreate
+    db: AsyncSession,
+    product_id: str,
+    variation_id: str,
+    data: VariationImageCreate,
+    redis: Redis | None = None,
 ) -> VariationOut:
     variation = await db.scalar(
         select(ProductVariation).where(
@@ -554,13 +574,19 @@ async def add_variation_image(
         )
     )
     await db.commit()
+    if redis:
+        await cache_delete_pattern(redis, "products:*")
 
     variations = await _load_variations(db, product_id)
     return next(v for v in variations if v.id == str(variation_id))
 
 
 async def delete_variation_image(
-    db: AsyncSession, product_id: str, variation_id: str, image_id: str
+    db: AsyncSession,
+    product_id: str,
+    variation_id: str,
+    image_id: str,
+    redis: Redis | None = None,
 ) -> None:
     image = await db.scalar(
         select(ProductImage).where(
@@ -574,3 +600,5 @@ async def delete_variation_image(
 
     await db.delete(image)
     await db.commit()
+    if redis:
+        await cache_delete_pattern(redis, "products:*")

@@ -124,6 +124,14 @@ class Settings(BaseSettings):
         """
         return bool(self.SMTP_ORDER_PASSWORD or self.SMTP_INFO_PASSWORD)
 
+    # Instagram Graph API — used only to mirror the wrenzaleather account's
+    # media onto the homepage. Seeds `StoreSettings.instagram_access_token`
+    # on first read only; after that the DB row is the source of truth,
+    # since the weekly refresh job writes a new token there and this .env
+    # value is never picked up again without a container recreate.
+    INSTAGRAM_ACCESS_TOKEN: str = ""
+    INSTAGRAM_BUSINESS_ID: str = ""
+
     # Sentry
     SENTRY_DSN: str = ""
 

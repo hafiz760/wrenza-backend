@@ -116,3 +116,94 @@ async def test_create_product_unauthorized(client):
         json={"name": "Test", "description": "Test", "price": 1000, "stock": 10},
     )
     assert response.status_code == 401
+
+
+# ── onSale filter ──────────────────────────────────────────────
+
+
+async def _create_product(client, admin_headers, name, price, compare_at_price=None):
+    payload = {
+        "name": name,
+        "description": "A product.",
+        "price": price,
+        "stock": 10,
+    }
+    if compare_at_price is not None:
+        payload["compareAtPrice"] = compare_at_price
+    response = await client.post(
+        "/api/v1/admin/products", headers=admin_headers, json=payload
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+@pytest.mark.asyncio
+async def test_on_sale_filter_returns_only_discounted_products(client, admin_headers):
+    await _create_product(client, admin_headers, "Full Price Wallet", price=2000)
+    await _create_product(
+        client, admin_headers, "Discounted Wallet", price=1500, compare_at_price=2000
+    )
+    # A compareAtPrice that isn't actually higher than price is not a real
+    # discount — must not count as on sale.
+    await _create_product(
+        client, admin_headers, "Mispriced Wallet", price=2000, compare_at_price=1900
+    )
+
+    response = await client.get("/api/v1/products?onSale=true")
+    assert response.status_code == 200, response.text
+    names = {item["name"] for item in response.json()["items"]}
+    assert names == {"Discounted Wallet"}
+
+
+@pytest.mark.asyncio
+async def test_on_sale_filter_covers_variable_products(client, admin_headers):
+    product = await client.post(
+        "/api/v1/admin/products",
+        headers=admin_headers,
+        json={
+            "name": "Variable Card Holder",
+            "description": "A card holder.",
+            "kind": "variable",
+            "price": 1500,
+        },
+    )
+    product_id = product.json()["id"]
+
+    attr = await client.post(
+        "/api/v1/admin/attributes", headers=admin_headers, json={"name": "Colour"}
+    )
+    term = await client.post(
+        f"/api/v1/admin/attributes/{attr.json()['id']}/terms",
+        headers=admin_headers,
+        json={"value": "Blue"},
+    )
+    await client.put(
+        f"/api/v1/admin/products/{product_id}/attributes",
+        headers=admin_headers,
+        json={
+            "attributes": [
+                {"attributeId": attr.json()["id"], "termIds": [term.json()["id"]]}
+            ]
+        },
+    )
+    generated = (
+        await client.post(
+            f"/api/v1/admin/products/{product_id}/variations/generate",
+            headers=admin_headers,
+        )
+    ).json()
+    variation_id = generated[0]["id"]
+
+    # Not on sale yet — the product's own price fields don't apply to a
+    # variable product, only its variations' do.
+    not_yet = await client.get("/api/v1/products?onSale=true")
+    assert product_id not in {item["id"] for item in not_yet.json()["items"]}
+
+    await client.put(
+        f"/api/v1/admin/products/{product_id}/variations",
+        headers=admin_headers,
+        json={"variations": [{"id": variation_id, "price": 1200, "compareAtPrice": 1500}]},
+    )
+
+    on_sale = await client.get("/api/v1/products?onSale=true")
+    assert product_id in {item["id"] for item in on_sale.json()["items"]}

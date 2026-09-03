@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from redis.asyncio import Redis
-from sqlalchemy import select, desc, asc, func, or_
+from sqlalchemy import select, desc, asc, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -267,6 +267,43 @@ def _product_to_full_out(
     )
 
 
+async def _category_and_descendant_ids(db: AsyncSession, slug: str) -> list[str]:
+    """A category slug filter has to include its descendants, not just an
+    exact match — a parent like "Leather Wallets" carries no products
+    directly (they're all filed under "Bifold"/"Long" beneath it), so an
+    exact-slug filter always returned zero results for it. Same bug the
+    public `/categories` tree's `productCount` had before it started
+    rolling counts up through children; this is the same fix for the other
+    place category depth matters.
+
+    Loads every category rather than a recursive query — cheap for a shop's
+    category count, and avoids a database-specific recursive CTE.
+    """
+    result = await db.execute(select(Category.id, Category.slug, Category.parent_id))
+    rows = result.all()
+
+    children_of: dict[str, list[str]] = {}
+    matched_id: str | None = None
+    for cat_id, cat_slug, parent_id in rows:
+        if cat_slug == slug:
+            matched_id = str(cat_id)
+        if parent_id is not None:
+            children_of.setdefault(str(parent_id), []).append(str(cat_id))
+
+    if matched_id is None:
+        return []
+
+    ids = [matched_id]
+    stack = [matched_id]
+    while stack:
+        current = stack.pop()
+        for child_id in children_of.get(current, []):
+            ids.append(child_id)
+            stack.append(child_id)
+
+    return ids
+
+
 async def list_products(
     db: AsyncSession,
     redis: Redis | None,
@@ -276,6 +313,7 @@ async def list_products(
     product_type: str | None = None,
     attribute_terms: list[str] | None = None,
     ids: list[str] | None = None,
+    on_sale: bool | None = None,
     sort_by: str | None = None,
     search: str | None = None,
     page: int = 1,
@@ -293,6 +331,7 @@ async def list_products(
             "product_type": product_type,
             "attribute_terms": sorted(attribute_terms) if attribute_terms else None,
             "ids": ids,
+            "on_sale": on_sale,
             "sort_by": sort_by,
             "search": search,
             "page": page,
@@ -325,7 +364,8 @@ async def list_products(
             )
         query = query.where(Product.id.in_(ids))
     if category:
-        query = query.join(Category).where(Category.slug == category)
+        category_ids = await _category_and_descendant_ids(db, category)
+        query = query.where(Product.category_id.in_(category_ids))
     if min_price is not None:
         query = query.where(Product.price >= min_price)
     if max_price is not None:
@@ -357,6 +397,30 @@ async def list_products(
                 Product.name.ilike(f"%{search}%"),
                 Product.description.ilike(f"%{search}%"),
                 Product.tags.cast(str).ilike(f"%{search}%"),
+            )
+        )
+    if on_sale:
+        # A simple product is on sale by its own price fields; a variable
+        # one is on sale if any active variation is, since the product's own
+        # price/compare_at_price columns aren't meaningful for that kind —
+        # `_derived` already treats variation prices as the source of truth.
+        variation_on_sale = (
+            select(ProductVariation.id)
+            .where(
+                ProductVariation.product_id == Product.id,
+                ProductVariation.is_active.is_(True),
+                ProductVariation.compare_at_price.is_not(None),
+                ProductVariation.compare_at_price > ProductVariation.price,
+            )
+            .exists()
+        )
+        query = query.where(
+            or_(
+                and_(
+                    Product.compare_at_price.is_not(None),
+                    Product.compare_at_price > Product.price,
+                ),
+                variation_on_sale,
             )
         )
 

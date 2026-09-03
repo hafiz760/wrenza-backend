@@ -76,5 +76,7 @@ class TestimonialCreate(CamelModel):
     avatar: Annotated[str, Field(min_length=1, max_length=500)] | None = None
     comment: Annotated[str, Field(min_length=1, max_length=2000)]
     rating: Annotated[int, Field(ge=1, le=5)]
+    image: Annotated[str, Field(min_length=1, max_length=500)] | None = None
+    is_verified_buyer: bool | None = None
     is_active: bool | None = None
 
