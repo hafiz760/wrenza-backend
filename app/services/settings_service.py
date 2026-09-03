@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.models.settings import StoreSettings
 
 
@@ -14,6 +15,11 @@ async def get_or_create(db: AsyncSession) -> StoreSettings:
     settings = await db.scalar(select(StoreSettings).limit(1))
     if settings is None:
         settings = StoreSettings()
+        # One-time seed from .env — after this the DB row is authoritative,
+        # since the refresh job overwrites it with tokens .env never sees.
+        env = get_settings()
+        if env.INSTAGRAM_ACCESS_TOKEN:
+            settings.instagram_access_token = env.INSTAGRAM_ACCESS_TOKEN
         db.add(settings)
         await db.commit()
         await db.refresh(settings)

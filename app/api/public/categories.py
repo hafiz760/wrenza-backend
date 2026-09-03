@@ -1,15 +1,15 @@
 from fastapi import APIRouter
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import noload
 
 from app.core.deps import DbSession, RedisClient
-from app.db.models.product import Category
+from app.db.models.product import Category, Product
 from app.utils.cache import cache_get, cache_key, cache_set
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
 
 
-def _build_tree(categories: list[Category]) -> list[dict]:
+def _build_tree(categories: list[Category], own_counts: dict[str, int]) -> list[dict]:
     """Assemble the category tree in Python, to any depth, from one query.
 
     Walking `Category.children` instead would lazy-load a level at a time, and
@@ -24,6 +24,7 @@ def _build_tree(categories: list[Category]) -> list[dict]:
             "description": c.description,
             "imageUrl": c.image_url,
             "children": [],
+            "_own_count": own_counts.get(str(c.id), 0),
         }
         for c in categories
     }
@@ -38,6 +39,19 @@ def _build_tree(categories: list[Category]) -> list[dict]:
             parent["children"].append(node)
         elif c.parent_id is None:
             roots.append(node)
+
+    def roll_up(node: dict) -> int:
+        """`productCount` includes descendants — a parent like "Leather
+        Wallets" carries no products directly (they're all filed under its
+        children), so counting only its own row would always read 0 for
+        it too, same bug as leaf categories reading 0 by having no
+        children. Recurses first so a grandparent's total is correct."""
+        total = node.pop("_own_count") + sum(roll_up(child) for child in node["children"])
+        node["productCount"] = total
+        return total
+
+    for root in roots:
+        roll_up(root)
 
     return roots
 
@@ -55,7 +69,16 @@ async def list_categories(db: DbSession, redis: RedisClient):
         .where(Category.is_active.is_(True))
         .order_by(Category.name)
     )
-    data = _build_tree(list(result.scalars().all()))
+    categories = list(result.scalars().all())
+
+    counts = await db.execute(
+        select(Product.category_id, func.count(Product.id))
+        .where(Product.is_active.is_(True), Product.category_id.is_not(None))
+        .group_by(Product.category_id)
+    )
+    own_counts = {str(category_id): count for category_id, count in counts.all()}
+
+    data = _build_tree(categories, own_counts)
 
     await cache_set(redis, ck, data, ttl=600)
     return data

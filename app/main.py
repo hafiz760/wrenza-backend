@@ -93,6 +93,7 @@ def create_app() -> FastAPI:
     from app.api.public.settings import router as public_settings
     from app.api.public.testimonials import router as public_testimonials
     from app.api.public.contact import router as public_contact
+    from app.api.public.instagram import router as public_instagram
     from app.api.public.checkout import router as public_checkout
     from app.api.public.webhooks import router as public_webhooks
 
@@ -103,6 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(public_settings, prefix="/api/v1")
     app.include_router(public_testimonials, prefix="/api/v1")
     app.include_router(public_contact, prefix="/api/v1")
+    app.include_router(public_instagram, prefix="/api/v1")
     app.include_router(public_checkout, prefix="/api/v1")
     app.include_router(public_webhooks, prefix="/api/v1")
 

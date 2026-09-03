@@ -9,21 +9,24 @@ from app.utils.casing import camelize
 router = APIRouter(prefix="/testimonials", tags=["Admin - Testimonials"])
 
 
+def _to_dict(t: Testimonial) -> dict:
+    return {
+        "id": str(t.id),
+        "name": t.name,
+        "location": t.location,
+        "avatar": t.avatar,
+        "comment": t.comment,
+        "rating": t.rating,
+        "image": t.image,
+        "is_verified_buyer": t.is_verified_buyer,
+        "is_active": t.is_active,
+    }
+
+
 @router.get("")
 async def list_testimonials(db: DbSession, admin: AdminUser):
     result = await db.execute(select(Testimonial))
-    return camelize([
-        {
-            "id": str(t.id),
-            "name": t.name,
-            "location": t.location,
-            "avatar": t.avatar,
-            "comment": t.comment,
-            "rating": t.rating,
-            "is_active": t.is_active,
-        }
-        for t in result.scalars().all()
-    ])
+    return camelize([_to_dict(t) for t in result.scalars().all()])
 
 
 @router.post("")
@@ -34,19 +37,13 @@ async def create_testimonial(data: TestimonialCreate, admin: AdminUser, db: DbSe
         avatar=data.avatar,
         comment=data.comment,
         rating=data.rating,
+        image=data.image,
+        is_verified_buyer=data.is_verified_buyer or False,
     )
     db.add(testimonial)
     await db.commit()
     await db.refresh(testimonial)
-    return camelize({
-        "id": str(testimonial.id),
-        "name": testimonial.name,
-        "location": testimonial.location,
-        "avatar": testimonial.avatar,
-        "comment": testimonial.comment,
-        "rating": testimonial.rating,
-        "is_active": testimonial.is_active,
-    })
+    return camelize(_to_dict(testimonial))
 
 
 @router.put("/{testimonial_id}")
@@ -60,15 +57,7 @@ async def update_testimonial(testimonial_id: str, data: TestimonialCreate, admin
 
     await db.commit()
     await db.refresh(testimonial)
-    return camelize({
-        "id": str(testimonial.id),
-        "name": testimonial.name,
-        "location": testimonial.location,
-        "avatar": testimonial.avatar,
-        "comment": testimonial.comment,
-        "rating": testimonial.rating,
-        "is_active": testimonial.is_active,
-    })
+    return camelize(_to_dict(testimonial))
 
 
 @router.delete("/{testimonial_id}")

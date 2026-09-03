@@ -32,6 +32,15 @@ class StoreSettings(Base, UUIDMixin):
     # down (e.g. a Safepay outage) without touching env vars or redeploying.
     # The storefront only offers "pay online" at checkout when this is on.
     safepay_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Long-lived Instagram Graph API token for the wrenzaleather account,
+    # seeded from INSTAGRAM_ACCESS_TOKEN on first read and kept fresh by a
+    # weekly refresh job — see app/services/instagram_service.py. Lives here
+    # rather than staying in .env because a token refresh must persist across
+    # container restarts, and `docker compose restart` does not re-read .env.
+    instagram_access_token: Mapped[str | None] = mapped_column(String(500))
+    instagram_token_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

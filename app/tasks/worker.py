@@ -9,7 +9,11 @@ from app.tasks.email_tasks import (
     send_order_status_update,
     send_password_reset,
 )
-from app.tasks.maintenance_tasks import cleanup_expired_discounts, generate_sitemap
+from app.tasks.maintenance_tasks import (
+    cleanup_expired_discounts,
+    generate_sitemap,
+    refresh_instagram_token,
+)
 
 
 def get_redis_settings() -> RedisSettings:
@@ -50,6 +54,7 @@ class WorkerSettings:
     cron_jobs = [
         cron(generate_sitemap, hour={0, 6, 12, 18}),  # Every 6 hours
         cron(cleanup_expired_discounts, hour=2, minute=0),  # Daily at 2 AM
+        cron(refresh_instagram_token, weekday=0, hour=3, minute=0),  # Weekly, Mon 3 AM
     ]
 
     redis_settings = get_redis_settings()

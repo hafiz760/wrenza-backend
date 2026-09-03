@@ -234,3 +234,97 @@ async def test_inactive_category_drops_its_whole_subtree(client, admin_headers):
     # The deactivated node goes, and the still-active grandchild goes with it
     assert "Bifold" not in names
     assert "Slim Bifold" not in names
+
+
+async def _create_product_in(client, admin_headers, name, category_id):
+    response = await client.post(
+        "/api/v1/admin/products",
+        headers=admin_headers,
+        json={
+            "name": name,
+            "description": "A product.",
+            "price": 1000,
+            "stock": 5,
+            "categoryId": category_id,
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_product_count_is_products_not_child_categories(
+    client, admin_headers
+):
+    """Regression: `productCount` used to be `len(children)` — a leaf
+    category (no subcategories) always read 0 regardless of how many real
+    products it held, and a parent's count was actually its subcategory
+    count, not a product count at all."""
+    card_holders = await _create_category(client, admin_headers, "Card Holders")
+    await _create_product_in(client, admin_headers, "Slim Card Holder", card_holders)
+    await _create_product_in(client, admin_headers, "Compact Card Holder", card_holders)
+
+    response = await client.get("/api/v1/categories")
+    tree = response.json()
+    node = next(c for c in tree if c["id"] == card_holders)
+    assert node["children"] == []
+    assert node["productCount"] == 2
+
+
+@pytest.mark.asyncio
+async def test_product_count_rolls_up_through_children(client, admin_headers):
+    """A parent with no products of its own (everything is filed under its
+    children) still has to report a real total, not 0."""
+    wallets = await _create_category(client, admin_headers, "Wallets")
+    bifold = await _create_category(client, admin_headers, "Bifold", wallets)
+    long = await _create_category(client, admin_headers, "Long", wallets)
+
+    await _create_product_in(client, admin_headers, "Classic Bifold", bifold)
+    await _create_product_in(client, admin_headers, "Slim Bifold", bifold)
+    await _create_product_in(client, admin_headers, "Travel Long Wallet", long)
+
+    response = await client.get("/api/v1/categories")
+    tree = response.json()
+    wallets_node = next(c for c in tree if c["id"] == wallets)
+    bifold_node = next(c for c in wallets_node["children"] if c["id"] == bifold)
+    long_node = next(c for c in wallets_node["children"] if c["id"] == long)
+
+    assert bifold_node["productCount"] == 2
+    assert long_node["productCount"] == 1
+    assert wallets_node["productCount"] == 3
+
+
+@pytest.mark.asyncio
+async def test_filtering_by_parent_category_includes_child_products(
+    client, admin_headers
+):
+    """Regression: `?category=<parent-slug>` used to match the category by
+    exact slug only, so a parent with nothing filed directly under it (e.g.
+    "Leather Wallets", whose products all live under "Bifold"/"Long")
+    always returned zero results — the storefront's own category tile for
+    it was a dead link."""
+    wallets_response = await client.post(
+        "/api/v1/admin/categories", headers=admin_headers, json={"name": "Wallets"}
+    )
+    wallets_id = wallets_response.json()["id"]
+    wallets_slug = wallets_response.json()["slug"]
+    bifold = await _create_category(client, admin_headers, "Bifold", wallets_id)
+
+    await _create_product_in(client, admin_headers, "Classic Bifold", bifold)
+    await _create_product_in(client, admin_headers, "Slim Bifold", bifold)
+
+    response = await client.get(f"/api/v1/products?category={wallets_slug}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 2
+    assert {item["name"] for item in body["items"]} == {
+        "Classic Bifold",
+        "Slim Bifold",
+    }
+
+
+@pytest.mark.asyncio
+async def test_filtering_by_unknown_category_returns_empty(client):
+    response = await client.get("/api/v1/products?category=does-not-exist")
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 0
