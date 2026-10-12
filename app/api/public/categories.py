@@ -23,6 +23,11 @@ def _build_tree(categories: list[Category], own_counts: dict[str, int]) -> list[
             "slug": c.slug,
             "description": c.description,
             "imageUrl": c.image_url,
+            "metaTitle": c.meta_title,
+            "metaDescription": c.meta_description,
+            "canonicalUrl": c.canonical_url,
+            "isIndexable": c.is_indexable,
+            "updatedAt": c.updated_at,
             "children": [],
             "_own_count": own_counts.get(str(c.id), 0),
         }

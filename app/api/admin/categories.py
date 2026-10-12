@@ -20,6 +20,11 @@ def _category_out(c: Category) -> dict:
         "slug": c.slug,
         "description": c.description,
         "image_url": c.image_url,
+        "meta_title": c.meta_title,
+        "meta_description": c.meta_description,
+        "canonical_url": c.canonical_url,
+        "is_indexable": c.is_indexable,
+        "updated_at": c.updated_at,
         "parent_id": str(c.parent_id) if c.parent_id else None,
         "is_active": c.is_active,
     }
@@ -63,6 +68,10 @@ async def create_category(data: CategoryCreate, admin: AdminUser, db: DbSession,
         slug=slug,
         description=data.description,
         image_url=data.image_url,
+        meta_title=data.meta_title,
+        meta_description=data.meta_description,
+        canonical_url=data.canonical_url,
+        is_indexable=data.is_indexable,
         parent_id=data.parent_id,
     )
     db.add(category)
