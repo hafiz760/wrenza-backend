@@ -13,6 +13,78 @@ async def _create_category(client, admin_headers, name, parent_id=None):
 
 
 @pytest.mark.asyncio
+async def test_category_seo_fields_round_trip_through_admin_and_public_apis(
+    client, admin_headers
+):
+    """SEO fields must be saved and visible to both dashboard and storefront.
+
+    This prevents Swagger-only fields from being silently discarded on create,
+    or hidden from the GET responses that the dashboard and storefront use.
+    """
+    body = {
+        "name": "Leather Wallets",
+        "slug": "leather-wallets",
+        "description": "Genuine leather wallets for men in Pakistan.",
+        "metaTitle": "Leather Wallets in Pakistan | Wrenza",
+        "metaDescription": "Shop genuine leather wallets for men in Pakistan from Wrenza.",
+        "canonicalUrl": "https://wrenza.com/products?category=leather-wallets",
+        "isIndexable": True,
+    }
+
+    created = await client.post(
+        "/api/v1/admin/categories", headers=admin_headers, json=body
+    )
+    assert created.status_code == 200, created.text
+    category_id = created.json()["id"]
+
+    for response in (created,):
+        data = response.json()
+        assert data["metaTitle"] == body["metaTitle"]
+        assert data["metaDescription"] == body["metaDescription"]
+        assert data["canonicalUrl"] == body["canonicalUrl"]
+        assert data["isIndexable"] is True
+        assert "updatedAt" in data
+
+    admin_get = await client.get(
+        f"/api/v1/admin/categories/{category_id}", headers=admin_headers
+    )
+    assert admin_get.status_code == 200, admin_get.text
+    assert admin_get.json()["metaTitle"] == body["metaTitle"]
+
+    public = await client.get("/api/v1/categories")
+    assert public.status_code == 200, public.text
+    category = next(item for item in public.json() if item["id"] == category_id)
+    assert category["metaTitle"] == body["metaTitle"]
+    assert category["metaDescription"] == body["metaDescription"]
+    assert category["canonicalUrl"] == body["canonicalUrl"]
+    assert category["isIndexable"] is True
+    assert "updatedAt" in category
+
+
+@pytest.mark.asyncio
+async def test_category_seo_fields_update_through_put(client, admin_headers):
+    """PUT must update SEO fields without requiring a slug or name change."""
+    category_id = await _create_category(client, admin_headers, "Wallets")
+
+    response = await client.put(
+        f"/api/v1/admin/categories/{category_id}",
+        headers=admin_headers,
+        json={
+            "metaTitle": "Updated Wallets | Wrenza",
+            "metaDescription": "Updated category description.",
+            "canonicalUrl": "https://wrenza.com/products?category=wallets",
+            "isIndexable": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["metaTitle"] == "Updated Wallets | Wrenza"
+    assert data["metaDescription"] == "Updated category description."
+    assert data["canonicalUrl"] == "https://wrenza.com/products?category=wallets"
+    assert data["isIndexable"] is False
+
+
+@pytest.mark.asyncio
 async def test_deactivate_via_put_replaces_soft_delete(client, admin_headers):
     """PUT with isActive:false is the supported way to hide a category."""
     cat_id = await _create_category(client, admin_headers, "Wallets")
