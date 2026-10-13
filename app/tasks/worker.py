@@ -4,6 +4,7 @@ from arq.connections import RedisSettings
 from app.core.config import get_settings
 from app.tasks.email_tasks import (
     send_contact_enquiry,
+    send_contact_confirmation,
     send_order_cancelled,
     send_order_confirmation,
     send_order_status_update,
@@ -49,6 +50,7 @@ class WorkerSettings:
         send_order_cancelled,
         send_password_reset,
         send_contact_enquiry,
+        send_contact_confirmation,
     ]
 
     cron_jobs = [
