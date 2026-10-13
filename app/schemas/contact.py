@@ -8,6 +8,7 @@ from app.schemas.common import CamelModel
 class ContactForm(CamelModel):
     name: Annotated[str, Field(min_length=1, max_length=100)]
     email: EmailStr
+    phone: Annotated[str, Field(max_length=50)] | None = None
     subject: Annotated[str, Field(min_length=1, max_length=200)] | None = None
     message: Annotated[str, Field(min_length=5, max_length=2000)]
 

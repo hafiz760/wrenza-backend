@@ -216,3 +216,17 @@ async def send_contact_enquiry(
         text=text,
         reply_to=email,
     )
+
+
+async def send_contact_confirmation(
+    ctx: dict, name: str, email: str
+) -> None:
+    """Confirm receipt to the customer from the information mailbox."""
+    subject = "We received your message — Wrenza"
+    html, text = render(
+        "contact_received",
+        subject=subject,
+        preheader="Your message is with the Wrenza team.",
+        name=name,
+    )
+    await send_email(Mailbox.INFO, to=email, subject=subject, html=html, text=text)

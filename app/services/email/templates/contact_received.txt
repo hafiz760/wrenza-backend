@@ -1,0 +1,8 @@
+THANK YOU, {{ name }}
+
+Your message has reached the Wrenza team. We’ll reply to this email within one working day.
+
+If you need to add anything, reply to this email and we’ll keep it with your enquiry.
+
+—
+Wrenza. Cut and stitched by hand in Lahore.

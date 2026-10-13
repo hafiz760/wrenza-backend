@@ -241,12 +241,16 @@ async def test_contact_form_emails_the_shop(client, outbox, run_jobs):
     )
     assert response.status_code == 200, response.text
 
-    assert len(outbox) == 1
-    enquiry = outbox[0]
+    assert len(outbox) == 2
+    enquiry = next(item for item in outbox if item["reply_to"] == "ayesha@example.com")
     assert enquiry["mailbox"] == "info"
     # Replying must reach the person who asked, not info@
     assert enquiry["reply_to"] == "ayesha@example.com"
     assert "34in waist" in enquiry["html"]
+
+    confirmation = next(item for item in outbox if item["to"] == "ayesha@example.com")
+    assert confirmation["mailbox"] == "info"
+    assert "message has reached the Wrenza team" in confirmation["text"]
 
 
 # ── Password reset ──────────────────────────────────────────────

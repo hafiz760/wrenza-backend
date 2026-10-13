@@ -13,10 +13,12 @@ router = APIRouter(tags=["Contact"])
 
 @router.post("/contact", response_model=MessageResponse)
 async def submit_contact(data: ContactForm, db: DbSession):
+    subject_line = data.subject or "Website contact form"
     submission = ContactSubmission(
         name=data.name,
         email=data.email,
-        subject=data.subject,
+        phone=data.phone,
+        subject=subject_line,
         message=data.message,
     )
     db.add(submission)
@@ -28,9 +30,10 @@ async def submit_contact(data: ContactForm, db: DbSession):
         "send_contact_enquiry",
         data.name,
         data.email,
-        data.subject,
+        subject_line,
         data.message,
     )
+    await enqueue("send_contact_confirmation", data.name, data.email)
 
     return MessageResponse(message="Thank you for contacting us. We'll get back to you soon.")
 
