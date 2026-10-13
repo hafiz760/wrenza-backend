@@ -1,7 +1,7 @@
 """add phone to contact submissions
 
 Revision ID: 9f42c6a81d30
-Revises: c4f9a3e18b25
+Revises: 37a56a3ce867
 Create Date: 2026-10-13
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = "9f42c6a81d30"
-down_revision: Union[str, None] = "c4f9a3e18b25"
+down_revision: Union[str, None] = "37a56a3ce867"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
