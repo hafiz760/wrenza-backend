@@ -79,6 +79,7 @@ async def test_public_settings_exposes_pricing_only(client, admin_headers):
     # Same reasoning for `safepayEnabled` — checkout needs to know whether
     # to offer "pay online" before the customer even opens the form.
     assert "safepayEnabled" in body
+    assert body["instagramEnabled"] is False
     # Nothing an anonymous visitor has no business seeing.
     assert "storeName" not in body
     assert "contactEmail" not in body

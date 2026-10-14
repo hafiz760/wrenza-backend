@@ -1,7 +1,7 @@
 from typing import Annotated
 
-from fastapi import APIRouter
-from pydantic import EmailStr, Field
+from fastapi import APIRouter, HTTPException
+from pydantic import EmailStr, Field, SecretStr
 
 from app.core.deps import AdminUser, DbSession
 from app.db.models.settings import StoreSettings
@@ -22,6 +22,10 @@ class StoreSettingsOut(CamelModel):
     low_stock_threshold: int
     maintenance_mode: bool
     safepay_enabled: bool
+    instagram_enabled: bool
+    instagram_business_id: str | None
+    instagram_token_configured: bool
+    instagram_token_refreshed_at: str | None
 
 
 class StoreSettingsUpdate(CamelModel):
@@ -35,6 +39,9 @@ class StoreSettingsUpdate(CamelModel):
     low_stock_threshold: Annotated[int, Field(ge=0)] | None = None
     maintenance_mode: bool | None = None
     safepay_enabled: bool | None = None
+    instagram_enabled: bool | None = None
+    instagram_business_id: Annotated[str, Field(max_length=255)] | None = None
+    instagram_access_token: Annotated[SecretStr, Field(max_length=500)] | None = None
 
 
 def _to_out(s: StoreSettings) -> StoreSettingsOut:
@@ -49,6 +56,14 @@ def _to_out(s: StoreSettings) -> StoreSettingsOut:
         low_stock_threshold=s.low_stock_threshold,
         maintenance_mode=s.maintenance_mode,
         safepay_enabled=s.safepay_enabled,
+        instagram_enabled=s.instagram_enabled,
+        instagram_business_id=s.instagram_business_id,
+        instagram_token_configured=bool(s.instagram_access_token),
+        instagram_token_refreshed_at=(
+            s.instagram_token_refreshed_at.isoformat()
+            if s.instagram_token_refreshed_at
+            else None
+        ),
     )
 
 
@@ -63,8 +78,22 @@ async def update_settings(
 ):
     settings = await settings_service.get_or_create(db)
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    values = data.model_dump(exclude_unset=True)
+    token = values.pop("instagram_access_token", None)
+    if token is not None:
+        settings.instagram_access_token = token.get_secret_value()
+        settings.instagram_token_refreshed_at = None
+
+    for key, value in values.items():
         setattr(settings, key, value)
+
+    if settings.instagram_enabled and (
+        not settings.instagram_business_id or not settings.instagram_access_token
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Instagram requires both a Business ID and access token before it can be enabled.",
+        )
 
     await db.commit()
     await db.refresh(settings)

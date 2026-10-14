@@ -26,6 +26,7 @@ class PublicSettingsOut(CamelModel):
     free_shipping_threshold: float
     maintenance_mode: bool
     safepay_enabled: bool
+    instagram_enabled: bool
 
 
 @router.get("", response_model=PublicSettingsOut)
@@ -38,4 +39,5 @@ async def get_public_settings(db: DbSession):
         free_shipping_threshold=float(s.free_shipping_threshold),
         maintenance_mode=s.maintenance_mode,
         safepay_enabled=s.safepay_enabled,
+        instagram_enabled=s.instagram_enabled,
     )
