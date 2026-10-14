@@ -16,7 +16,6 @@ import structlog
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.services import settings_service
 from app.utils.cache import cache_get, cache_key, cache_set
 
@@ -50,12 +49,16 @@ async def get_media(db: AsyncSession, redis: Redis) -> list[dict]:
     Fails open: a missing token or an Instagram outage must never break the
     homepage, same reasoning as `Settings.email_enabled` elsewhere.
     """
-    business_id = get_settings().INSTAGRAM_BUSINESS_ID
     store_settings = await settings_service.get_or_create(db)
-    if not store_settings.instagram_access_token or not business_id:
+    business_id = store_settings.instagram_business_id
+    if (
+        not store_settings.instagram_enabled
+        or not store_settings.instagram_access_token
+        or not business_id
+    ):
         return []
 
-    ck = cache_key("instagram", "media")
+    ck = cache_key("instagram", "media", business_id)
     cached = await cache_get(redis, ck)
     if cached is not None:
         return cached
@@ -114,7 +117,7 @@ async def refresh_token(db: AsyncSession) -> bool:
     must not wipe out a token that still has weeks left on it.
     """
     store_settings = await settings_service.get_or_create(db)
-    if not store_settings.instagram_access_token:
+    if not store_settings.instagram_enabled or not store_settings.instagram_access_token:
         return False
 
     try:

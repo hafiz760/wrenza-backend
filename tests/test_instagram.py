@@ -6,43 +6,24 @@ depend on being reachable — matching how `test_safepay.py` handles its own
 third-party gateway calls.
 """
 
-from types import SimpleNamespace
-
 import pytest
 
 from app.services import instagram_service
 
 
-@pytest.fixture
-def configured_settings(monkeypatch):
-    """Points instagram_service at a business id without touching the
-    process-wide lru_cache'd Settings singleton other tests rely on."""
-    fake_settings = SimpleNamespace(INSTAGRAM_BUSINESS_ID="17841480302328569")
-    monkeypatch.setattr(instagram_service, "get_settings", lambda: fake_settings)
-
-
-@pytest.fixture(autouse=True)
-def no_env_token(monkeypatch):
-    """Blocks `settings_service`'s .env-seed on a fresh row.
-
-    A real INSTAGRAM_ACCESS_TOKEN lives in the dev .env for production use;
-    without this, every "nothing configured yet" test would pass or fail
-    depending on whether that value happens to be set on the machine
-    running the suite.
-    """
-    from app.services import settings_service
-
-    fake_env = SimpleNamespace(INSTAGRAM_ACCESS_TOKEN="")
-    monkeypatch.setattr(settings_service, "get_settings", lambda: fake_env)
-
-
-async def _set_stored_token(token: str | None):
+async def _set_stored_token(
+    token: str | None,
+    business_id: str | None = "17841480302328569",
+    enabled: bool = True,
+):
     from tests.conftest import TestingSessionLocal
     from app.services import settings_service
 
     async with TestingSessionLocal() as db:
         settings = await settings_service.get_or_create(db)
         settings.instagram_access_token = token
+        settings.instagram_business_id = business_id
+        settings.instagram_enabled = enabled
         await db.commit()
 
 
@@ -54,18 +35,15 @@ async def test_media_empty_when_no_token_configured(client):
 
 
 @pytest.mark.asyncio
-async def test_media_empty_when_business_id_missing(client, monkeypatch):
-    await _set_stored_token("a-token")
-    monkeypatch.setattr(
-        instagram_service, "get_settings", lambda: SimpleNamespace(INSTAGRAM_BUSINESS_ID="")
-    )
+async def test_media_empty_when_business_id_missing(client):
+    await _set_stored_token("a-token", business_id=None)
 
     response = await client.get("/api/v1/instagram/media")
     assert response.json() == {"data": []}
 
 
 @pytest.mark.asyncio
-async def test_media_fetches_and_trims_fields(client, configured_settings, monkeypatch):
+async def test_media_fetches_and_trims_fields(client, monkeypatch):
     await _set_stored_token("a-token")
 
     async def fake_fetch_media(business_id, access_token):
@@ -110,7 +88,7 @@ async def test_media_fetches_and_trims_fields(client, configured_settings, monke
 
 @pytest.mark.asyncio
 async def test_video_without_thumbnail_is_dropped_not_shown_as_broken_image(
-    client, configured_settings, monkeypatch
+    client, monkeypatch
 ):
     await _set_stored_token("a-token")
 
@@ -145,7 +123,7 @@ async def test_video_without_thumbnail_is_dropped_not_shown_as_broken_image(
 
 
 @pytest.mark.asyncio
-async def test_media_is_cached_across_requests(client, configured_settings, monkeypatch):
+async def test_media_is_cached_across_requests(client, monkeypatch):
     await _set_stored_token("a-token")
     calls = 0
 
@@ -172,7 +150,7 @@ async def test_media_is_cached_across_requests(client, configured_settings, monk
 
 
 @pytest.mark.asyncio
-async def test_media_fails_open_on_api_error(client, configured_settings, monkeypatch):
+async def test_media_fails_open_on_api_error(client, monkeypatch):
     import httpx
 
     await _set_stored_token("a-token")
@@ -185,6 +163,35 @@ async def test_media_fails_open_on_api_error(client, configured_settings, monkey
     response = await client.get("/api/v1/instagram/media")
     assert response.status_code == 200
     assert response.json() == {"data": []}
+
+
+@pytest.mark.asyncio
+async def test_disabled_integration_skips_graph_api(client, monkeypatch):
+    await _set_stored_token("a-token", enabled=False)
+
+    async def unexpected_fetch(*args):
+        pytest.fail("Graph API must not be called while Instagram is disabled")
+
+    monkeypatch.setattr(instagram_service, "_fetch_media", unexpected_fetch)
+    response = await client.get("/api/v1/instagram/media")
+
+    assert response.status_code == 200
+    assert response.json() == {"data": []}
+
+
+@pytest.mark.asyncio
+async def test_admin_settings_never_returns_instagram_token(client, admin_headers):
+    await _set_stored_token("secret-token")
+
+    response = await client.get("/api/v1/admin/settings", headers=admin_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["instagramEnabled"] is True
+    assert body["instagramBusinessId"] == "17841480302328569"
+    assert body["instagramTokenConfigured"] is True
+    assert "instagramAccessToken" not in body
+    assert "secret-token" not in response.text
 
 
 @pytest.mark.asyncio
