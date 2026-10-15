@@ -74,9 +74,10 @@ async def _pricing(db: AsyncSession, subtotal: Decimal) -> tuple[Decimal, Decima
     """
     settings = await settings_service.get_or_create(db)
 
+    free_shipping_threshold = Decimal(str(settings.free_shipping_threshold))
     shipping = (
         Decimal("0")
-        if subtotal >= Decimal(str(settings.free_shipping_threshold))
+        if free_shipping_threshold > 0 and subtotal >= free_shipping_threshold
         else Decimal(str(settings.shipping_cost))
     )
     taxable = subtotal + shipping

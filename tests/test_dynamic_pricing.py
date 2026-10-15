@@ -126,6 +126,24 @@ async def test_checkout_waives_shipping_at_the_configured_threshold(
 
 
 @pytest.mark.asyncio
+async def test_zero_free_shipping_threshold_keeps_configured_shipping_charge(
+    client, admin_headers
+):
+    await _set_settings(
+        client, admin_headers, shippingCost=200, freeShippingThreshold=0, taxRate=0
+    )
+    pid = await _product(client, admin_headers, price=3650)
+
+    checkout = await client.post(
+        "/api/v1/checkout",
+        json={**ADDRESS, "items": [{"productId": pid, "quantity": 1}]},
+    )
+    assert checkout.status_code == 200, checkout.text
+    assert checkout.json()["shipping"] == 200
+    assert checkout.json()["total"] == 3850
+
+
+@pytest.mark.asyncio
 async def test_checkout_applies_tax_to_subtotal_plus_shipping(
     client, admin_headers
 ):
