@@ -24,6 +24,7 @@ from app.schemas.product import (
     ProductListOut,
     ProductOut,
     ProductUpdate,
+    VariationPrice,
 )
 from app.schemas.common import PaginatedResponse
 from app.schemas.faq import FaqOut
@@ -194,7 +195,9 @@ async def load_swatches(
 
 
 def _product_to_list_out(
-    p: Product, swatches: list[ProductSwatchOut] | None = None
+    p: Product,
+    swatches: list[ProductSwatchOut] | None = None,
+    variation_prices: list[VariationPrice] | None = None,
 ) -> ProductListOut:
     featured, gallery = _split_images(p)
     price, price_range, stock = _derived(p)
@@ -206,6 +209,7 @@ def _product_to_list_out(
         name=p.name,
         price=price,
         price_range=price_range,
+        variation_prices=variation_prices or [],
         compare_at_price=float(p.compare_at_price) if p.compare_at_price else None,
         currency=p.currency,
         featured_image=featured,
@@ -219,6 +223,61 @@ def _product_to_list_out(
         is_indexable=p.is_indexable,
         updated_at=p.updated_at,
     )
+
+
+async def load_variation_prices(
+    db: AsyncSession, products: list[Product]
+) -> dict[str, list[VariationPrice]]:
+    """Load active variation labels/prices for admin tables in one query."""
+    if not products:
+        return {}
+
+    rows = await db.execute(
+        select(
+            ProductVariation.product_id,
+            ProductVariation.id,
+            ProductVariation.price,
+            ProductVariation.position,
+            Attribute.position,
+            AttributeTerm.position,
+            AttributeTerm.value,
+        )
+        .outerjoin(
+            VariationAttributeValue,
+            VariationAttributeValue.variation_id == ProductVariation.id,
+        )
+        .outerjoin(Attribute, Attribute.id == VariationAttributeValue.attribute_id)
+        .outerjoin(AttributeTerm, AttributeTerm.id == VariationAttributeValue.term_id)
+        .where(
+            ProductVariation.product_id.in_([p.id for p in products]),
+            ProductVariation.is_active.is_(True),
+        )
+        .order_by(
+            ProductVariation.position,
+            Attribute.position,
+            AttributeTerm.position,
+        )
+    )
+
+    grouped: dict[str, dict[str, dict]] = {}
+    for product_id, variation_id, price, _, _, _, value in rows.all():
+        product_key, variation_key = str(product_id), str(variation_id)
+        variation = grouped.setdefault(product_key, {}).setdefault(
+            variation_key, {"price": float(price), "names": []}
+        )
+        if value:
+            variation["names"].append(value)
+
+    return {
+        product_id: [
+            VariationPrice(
+                name=" / ".join(item["names"]) or "Default variation",
+                price=item["price"],
+            )
+            for item in variations.values()
+        ]
+        for product_id, variations in grouped.items()
+    }
 
 
 def _product_to_full_out(
@@ -495,10 +554,16 @@ async def list_products_admin(
 
     result = await paginate(query, page, page_size, db)
     swatches = await load_swatches(db, result["items"])
+    variation_prices = await load_variation_prices(db, result["items"])
 
     return PaginatedResponse(
         items=[
-            _product_to_list_out(p, swatches.get(str(p.id))) for p in result["items"]
+            _product_to_list_out(
+                p,
+                swatches.get(str(p.id)),
+                variation_prices.get(str(p.id)),
+            )
+            for p in result["items"]
         ],
         total=result["total"],
         page=result["page"],

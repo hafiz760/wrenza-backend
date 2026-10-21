@@ -55,6 +55,50 @@ async def test_guest_can_review_without_an_account(client, admin_headers):
 
 
 @pytest.mark.asyncio
+async def test_review_accepts_up_to_three_imagekit_photos(client, admin_headers):
+    product = await _product(client, admin_headers)
+    images = [
+        f"https://ik.imagekit.io/ghio91g6p/reviews/customer-{index}.webp"
+        for index in range(3)
+    ]
+
+    response = await _post_review(
+        client,
+        product["id"],
+        name="Photo reviewer",
+        email="photos@example.com",
+        images=images,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["images"] == images
+
+
+@pytest.mark.asyncio
+async def test_review_rejects_more_than_three_or_non_imagekit_photos(
+    client, admin_headers
+):
+    product = await _product(client, admin_headers)
+    too_many = await _post_review(
+        client,
+        product["id"],
+        name="Photo reviewer",
+        email="photos@example.com",
+        images=[f"https://ik.imagekit.io/ghio91g6p/reviews/{index}.jpg" for index in range(4)],
+    )
+    external_host = await _post_review(
+        client,
+        product["id"],
+        name="Photo reviewer",
+        email="photos@example.com",
+        images=["https://example.com/not-imagekit.jpg"],
+    )
+
+    assert too_many.status_code == 422
+    assert external_host.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_guest_review_requires_name_and_email(client, admin_headers):
     product = await _product(client, admin_headers)
 
@@ -137,6 +181,35 @@ async def test_guest_review_appears_once_approved(client, admin_headers):
     assert payload["summary"]["total"] == 1
     assert len(payload["items"]) == 1, "guest review counted but not listed"
     assert payload["items"][0]["userName"] == "Khurram Ijaz"
+
+
+@pytest.mark.asyncio
+async def test_approved_review_photos_feed_contains_only_approved_reviews(
+    client, admin_headers
+):
+    product = await _product(client, admin_headers)
+    created = await _post_review(
+        client,
+        product["id"],
+        name="Photo reviewer",
+        email="photos@example.com",
+        images=["https://ik.imagekit.io/ghio91g6p/reviews/customer.webp"],
+    )
+
+    hidden = await client.get("/api/v1/review-photos")
+    assert hidden.status_code == 200
+    assert hidden.json() == []
+
+    await client.put(
+        f"/api/v1/admin/reviews/{created.json()['id']}/approve?approved=true",
+        headers=admin_headers,
+    )
+    visible = await client.get("/api/v1/review-photos")
+
+    assert visible.status_code == 200, visible.text
+    assert len(visible.json()) == 1
+    assert visible.json()[0]["image"] == "https://ik.imagekit.io/ghio91g6p/reviews/customer.webp"
+    assert visible.json()[0]["productSlug"] == product["slug"]
 
 
 # ── The guest's email is not public ─────────────────────────────

@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -38,6 +39,7 @@ class Review(Base, UUIDMixin):
     guest_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     rating: Mapped[int] = mapped_column(Integer)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    images: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     # Pending by default: anyone can post, so nothing reaches the storefront
     # until an admin approves it.
     is_approved: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
 
+from app.core.config import get_settings
 from app.core.deps import DbSession, OptionalUser, RedisClient
 from app.core.limiter import limiter
 from app.schemas.review import ReviewCreate, ReviewOut
