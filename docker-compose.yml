@@ -13,7 +13,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: wrenza-db
+      POSTGRES_DB: ${POSTGRES_DB:-wrenza-db}
     ports:
       # 5434 on the host. Two Postgres instances already run here, on 5432 and
       # 5433 — this container is a third, separate database with its own data.
@@ -21,7 +21,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d wrenza-db"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-wrenza-db}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -48,16 +48,18 @@ services:
     build:
       context: .
       target: dev
-    container_name: wrenza-api
+    container_name: wrenza-api-prod-copy
     env_file: .env
     environment:
       # Service names, not localhost — inside the network each container is
       # reachable by the name compose gives it.
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/wrenza-db
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/${POSTGRES_DB:-wrenza-db}
       REDIS_URL: redis://redis:6379/0
       POSTGRES_HOST: postgres
+      # Reconcile the database migration history separately before enabling.
+      RUN_MIGRATIONS: "0"
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       # Source mounted for reload. The venv is masked by an anonymous volume
       # so the container keeps its own Linux-built packages rather than
@@ -78,7 +80,7 @@ services:
     container_name: wrenza-worker
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/wrenza-db
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/${POSTGRES_DB:-wrenza-db}
       REDIS_URL: redis://redis:6379/0
       POSTGRES_HOST: postgres
       # The API already migrated and seeded. Two containers doing either at

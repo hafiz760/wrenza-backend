@@ -87,6 +87,7 @@ async def list_reviews(
             "is_guest": review.user_id is None,
             "rating": review.rating,
             "comment": review.comment,
+            "images": review.images or [],
             "is_approved": review.is_approved,
             "created_at": (
                 review.created_at.isoformat() if review.created_at else None

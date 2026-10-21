@@ -1,7 +1,7 @@
 import pytest
 
 from app.db.models.product import Product
-from app.db.models.user import Address
+from app.db.models.user import Address, User
 from app.db.models.wishlist import Wishlist
 from tests.conftest import TestingSessionLocal
 
@@ -62,3 +62,19 @@ async def test_customer_detail_requires_admin(client, test_user):
     response = await client.get(f"/api/v1/admin/users/{test_user.id}")
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_admin_user_list_includes_avatar(client, admin_headers, test_user):
+    avatar_url = "https://example.com/customer-avatar.png"
+    async with TestingSessionLocal() as db:
+        user = await db.get(User, test_user.id)
+        user.avatar = avatar_url
+        await db.commit()
+
+    response = await client.get(
+        f"/api/v1/admin/users?search={test_user.email}", headers=admin_headers
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["avatar"] == avatar_url

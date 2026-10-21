@@ -98,6 +98,13 @@ class PriceRange(CamelModel):
     max: float
 
 
+class VariationPrice(CamelModel):
+    """A variation's display name and price for admin product listings."""
+
+    name: str
+    price: float
+
+
 class APlusImage(CamelModel):
     """One composition of the A+ section.
 
@@ -194,6 +201,7 @@ class ProductListOut(CamelModel):
     name: str
     price: float
     price_range: PriceRange | None = None
+    variation_prices: list[VariationPrice] = Field(default_factory=list)
     compare_at_price: float | None = None
     currency: str
     featured_image: ProductImageOut | None = None

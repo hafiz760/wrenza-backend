@@ -65,6 +65,7 @@ class AdminUserOut(CamelModel):
     first_name: str
     last_name: str
     phone: str | None = None
+    avatar: str | None = None
     role: str
     is_active: bool
     created_at: datetime

@@ -36,6 +36,7 @@ def _review_to_out(r: Review, user: User | None = None) -> dict:
         "user_name": _display_name(r, user),
         "rating": r.rating,
         "comment": r.comment,
+        "images": r.images or [],
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 
@@ -90,6 +91,7 @@ async def create_review(
         guest_email=None if user else data.email.lower(),
         rating=data.rating,
         comment=data.comment,
+        images=data.images,
     )
     db.add(review)
     await db.flush()
@@ -175,6 +177,7 @@ async def list_public_reviews(
                 user_name=_display_name(r, u),
                 rating=r.rating,
                 comment=r.comment,
+                images=r.images or [],
                 created_at=r.created_at,
             )
             for r, u in rows.all()

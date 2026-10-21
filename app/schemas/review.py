@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Annotated
+from urllib.parse import urlsplit
 
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, field_validator
 
 from app.schemas.common import CamelModel
 
@@ -17,8 +18,26 @@ class ReviewCreate(CamelModel):
     product_id: Annotated[str, Field(min_length=1, max_length=36)]
     rating: Annotated[int, Field(ge=1, le=5)]
     comment: Annotated[str, Field(min_length=1, max_length=2000)] | None = None
+    images: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        default_factory=list, max_length=3
+    )
     name: Annotated[str, Field(min_length=1, max_length=100)] | None = None
     email: EmailStr | None = None
+
+    @field_validator("images")
+    @classmethod
+    def validate_image_urls(cls, images: list[str]) -> list[str]:
+        for image in images:
+            parsed = urlsplit(image)
+            path_segments = [segment for segment in parsed.path.split("/") if segment]
+            if (
+                parsed.scheme != "https"
+                or parsed.hostname != "ik.imagekit.io"
+                or len(path_segments) < 3
+                or path_segments[1] != "reviews"
+            ):
+                raise ValueError("Review images must be HTTPS ImageKit URLs")
+        return images
 
 
 class ReviewOut(CamelModel):
@@ -33,6 +52,7 @@ class ReviewOut(CamelModel):
     user_name: str
     rating: int
     comment: str | None = None
+    images: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
