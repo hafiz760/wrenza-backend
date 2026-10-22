@@ -14,6 +14,30 @@ async def test_list_products_empty(client):
 
 
 @pytest.mark.asyncio
+async def test_public_product_search_matches_name_and_json_tags(client, admin_headers):
+    created = await client.post(
+        "/api/v1/admin/products",
+        headers=admin_headers,
+        json={
+            "name": "Slim Leather Bifold Wallet",
+            "description": "A genuine leather wallet for daily carry.",
+            "price": 3150,
+            "stock": 10,
+            "tags": ["slim wallet", "bifold"],
+        },
+    )
+    assert created.status_code == 200
+
+    name_match = await client.get("/api/v1/products?page=1&pageSize=6&search=slim")
+    assert name_match.status_code == 200
+    assert name_match.json()["items"][0]["name"] == "Slim Leather Bifold Wallet"
+
+    tag_match = await client.get("/api/v1/products?search=bifold")
+    assert tag_match.status_code == 200
+    assert tag_match.json()["total"] == 1
+
+
+@pytest.mark.asyncio
 async def test_create_and_list_product(client, admin_headers):
     # Admin creates a product
     create_response = await client.post(

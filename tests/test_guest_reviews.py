@@ -182,6 +182,20 @@ async def test_guest_review_appears_once_approved(client, admin_headers):
     assert len(payload["items"]) == 1, "guest review counted but not listed"
     assert payload["items"][0]["userName"] == "Khurram Ijaz"
 
+    detail = await client.get(f"/api/v1/products/{product['slug']}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["rating"] == 5
+    assert detail.json()["reviewCount"] == 1
+
+    hide = await client.put(
+        f"/api/v1/admin/reviews/{review_id}/approve?approved=false",
+        headers=admin_headers,
+    )
+    assert hide.status_code == 200, hide.text
+    detail = await client.get(f"/api/v1/products/{product['slug']}")
+    assert detail.json()["rating"] == 0
+    assert detail.json()["reviewCount"] == 0
+
 
 @pytest.mark.asyncio
 async def test_approved_review_photos_feed_contains_only_approved_reviews(
@@ -193,7 +207,10 @@ async def test_approved_review_photos_feed_contains_only_approved_reviews(
         product["id"],
         name="Photo reviewer",
         email="photos@example.com",
-        images=["https://ik.imagekit.io/ghio91g6p/reviews/customer.webp"],
+        images=[
+            "https://ik.imagekit.io/ghio91g6p/reviews/customer-1.webp",
+            "https://ik.imagekit.io/ghio91g6p/reviews/customer-2.webp",
+        ],
     )
 
     hidden = await client.get("/api/v1/review-photos")
@@ -208,8 +225,46 @@ async def test_approved_review_photos_feed_contains_only_approved_reviews(
 
     assert visible.status_code == 200, visible.text
     assert len(visible.json()) == 1
-    assert visible.json()[0]["image"] == "https://ik.imagekit.io/ghio91g6p/reviews/customer.webp"
+    assert visible.json()[0]["images"] == [
+        "https://ik.imagekit.io/ghio91g6p/reviews/customer-1.webp",
+        "https://ik.imagekit.io/ghio91g6p/reviews/customer-2.webp",
+    ]
     assert visible.json()[0]["productSlug"] == product["slug"]
+
+
+@pytest.mark.asyncio
+async def test_homepage_review_photo_feed_returns_approved_reviews_with_all_ratings(
+    client, admin_headers
+):
+    product = await _product(client, admin_headers)
+    low_rated = await _post_review(
+        client,
+        product["id"],
+        name="Three star reviewer",
+        email="three@example.com",
+        rating=3,
+        images=["https://ik.imagekit.io/ghio91g6p/reviews/three-star.webp"],
+    )
+    high_rated = await _post_review(
+        client,
+        product["id"],
+        name="Four star reviewer",
+        email="four@example.com",
+        rating=4,
+        images=["https://ik.imagekit.io/ghio91g6p/reviews/four-star.webp"],
+    )
+
+    for review in (low_rated, high_rated):
+        await client.put(
+            f"/api/v1/admin/reviews/{review.json()['id']}/approve?approved=true",
+            headers=admin_headers,
+        )
+
+    response = await client.get("/api/v1/review-photos")
+
+    assert response.status_code == 200, response.text
+    assert {photo["rating"] for photo in response.json()} == {3, 4}
+    assert len(response.json()) == 2
 
 
 # ── The guest's email is not public ─────────────────────────────

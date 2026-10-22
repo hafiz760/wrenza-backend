@@ -257,10 +257,14 @@ async def create_order(
         from app.services.promotion_service import validate_discount
 
         discount_result = await validate_discount(
-            db, data.discount_code, float(subtotal)
+            db, data.discount_code, float(subtotal), consume=True
         )
-        if discount_result:
-            discount = Decimal(str(discount_result["amount"]))
+        if not discount_result:
+            raise HTTPException(
+                status_code=400,
+                detail="This discount code is invalid, expired, used up, or the order minimum is not met.",
+            )
+        discount = Decimal(str(discount_result["amount"]))
 
     total = subtotal + shipping + tax - discount
 
@@ -341,10 +345,14 @@ async def _build_order(
         from app.services.promotion_service import validate_discount
 
         discount_result = await validate_discount(
-            db, data.discount_code, float(subtotal)
+            db, data.discount_code, float(subtotal), consume=True
         )
-        if discount_result:
-            discount = Decimal(str(discount_result["amount"]))
+        if not discount_result:
+            raise HTTPException(
+                status_code=400,
+                detail="This discount code is invalid, expired, used up, or the order minimum is not met.",
+            )
+        discount = Decimal(str(discount_result["amount"]))
 
     total = subtotal + shipping + tax - discount
 
