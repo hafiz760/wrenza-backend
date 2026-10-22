@@ -10,10 +10,10 @@ from app.schemas.common import CamelModel
 router = APIRouter(prefix="/review-photos", tags=["Review Photos"])
 
 
-class ReviewPhotoOut(CamelModel):
+class ReviewGalleryOut(CamelModel):
     id: str
     review_id: str
-    image: str
+    images: list[str]
     product_name: str
     product_slug: str
     reviewer_name: str
@@ -21,12 +21,12 @@ class ReviewPhotoOut(CamelModel):
     comment: str | None = None
 
 
-@router.get("", response_model=list[ReviewPhotoOut])
+@router.get("", response_model=list[ReviewGalleryOut])
 async def list_review_photos(
     db: DbSession,
     limit: int = Query(24, ge=1, le=60),
 ):
-    """Recent approved customer photos for the storefront collage."""
+    """Recent approved customer reviews with photos for the storefront gallery."""
     result = await db.execute(
         select(Review, Product, User)
         .join(Product, Review.product_id == Product.id)
@@ -40,26 +40,23 @@ async def list_review_photos(
         .limit(limit)
     )
 
-    photos: list[ReviewPhotoOut] = []
+    galleries: list[ReviewGalleryOut] = []
     for review, product, user in result.all():
         reviewer_name = (
             f"{user.first_name} {user.last_name}".strip()
             if user
             else (review.guest_name or "Wrenza customer").strip()
         )
-        for index, image in enumerate(review.images or []):
-            photos.append(
-                ReviewPhotoOut(
-                    id=f"{review.id}:{index}",
-                    review_id=str(review.id),
-                    image=image,
-                    product_name=product.name,
-                    product_slug=product.slug,
-                    reviewer_name=reviewer_name,
-                    rating=review.rating,
-                    comment=review.comment,
-                )
+        galleries.append(
+            ReviewGalleryOut(
+                id=str(review.id),
+                review_id=str(review.id),
+                images=review.images or [],
+                product_name=product.name,
+                product_slug=product.slug,
+                reviewer_name=reviewer_name,
+                rating=review.rating,
+                comment=review.comment,
             )
-            if len(photos) >= limit:
-                return photos
-    return photos
+        )
+    return galleries

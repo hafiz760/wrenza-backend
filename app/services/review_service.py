@@ -1,3 +1,4 @@
+from decimal import Decimal, ROUND_HALF_UP
 from math import ceil
 from uuid import UUID
 
@@ -16,6 +17,33 @@ from app.schemas.review import (
     ReviewSummary,
 )
 from app.utils.cache import cache_delete_pattern
+
+
+async def recalculate_product_rating(db: AsyncSession, product_id: str) -> None:
+    """Keep the product's persisted aggregate equal to approved reviews.
+
+    Locking the product row before aggregating serializes concurrent moderation
+    actions for the same product, preventing the last transaction from writing
+    an average that missed another approval.
+    """
+    product = await db.scalar(
+        select(Product).where(Product.id == product_id).with_for_update()
+    )
+    if not product:
+        return
+
+    result = await db.execute(
+        select(func.avg(Review.rating), func.count(Review.id)).where(
+            Review.product_id == product_id, Review.is_approved.is_(True)
+        )
+    )
+    average, count = result.one()
+    product.rating = (
+        Decimal(str(average)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        if average is not None
+        else Decimal("0.0")
+    )
+    product.review_count = count or 0
 
 
 def _display_name(r: Review, user: User | None) -> str:
@@ -101,14 +129,7 @@ async def create_review(
     # endpoint is unauthenticated, and purging every product cache on each POST
     # would turn review spam into cache-stampede spam.
     if review.is_approved:
-        avg_result = await db.execute(
-            select(func.avg(Review.rating), func.count(Review.id)).where(
-                Review.product_id == data.product_id, Review.is_approved.is_(True)
-            )
-        )
-        avg_rating, count = avg_result.one()
-        product.rating = round(float(avg_rating or 0), 1)
-        product.review_count = count or 0
+        await recalculate_product_rating(db, data.product_id)
 
     await db.commit()
 
