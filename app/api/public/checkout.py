@@ -2,9 +2,25 @@ from fastapi import APIRouter
 
 from app.core.deps import DbSession, OptionalUser, RedisClient
 from app.schemas.order import CheckoutRequest, SafepayInitiateOut
+from app.schemas.promotion import DiscountValidationOut, DiscountValidationRequest
 from app.services import order_service
+from app.services.promotion_service import validate_discount
 
 router = APIRouter(tags=["Checkout"])
+
+
+@router.post("/checkout/discount/validate", response_model=DiscountValidationOut)
+async def validate_checkout_discount(data: DiscountValidationRequest, db: DbSession):
+    """Preview a coupon against the current cart subtotal."""
+    result = await validate_discount(db, data.code, data.subtotal)
+    if not result:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=400,
+            detail="This discount code is invalid, expired, used up, or the order minimum is not met.",
+        )
+    return result
 
 
 @router.post("/checkout")

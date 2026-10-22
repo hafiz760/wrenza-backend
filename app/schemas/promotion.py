@@ -39,6 +39,17 @@ class DiscountUpdate(CamelModel):
     is_active: bool | None = None
 
 
+class DiscountValidationRequest(CamelModel):
+    code: Annotated[str, Field(min_length=1, max_length=50)]
+    subtotal: Annotated[float, Field(ge=0)]
+
+
+class DiscountValidationOut(CamelModel):
+    code: str
+    percentage: int
+    amount: float
+
+
 class BannerOut(CamelModel):
     id: str
     title: str

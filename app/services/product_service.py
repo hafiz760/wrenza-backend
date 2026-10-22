@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from redis.asyncio import Redis
-from sqlalchemy import select, desc, asc, func, or_, and_
+from sqlalchemy import Text, and_, asc, cast, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -450,12 +450,14 @@ async def list_products(
                     .where(AttributeTerm.slug == term_slug)
                 )
             )
-    if search:
+    search_term = search.strip() if search else ""
+    if search_term:
         query = query.where(
             or_(
-                Product.name.ilike(f"%{search}%"),
-                Product.description.ilike(f"%{search}%"),
-                Product.tags.cast(str).ilike(f"%{search}%"),
+                Product.name.ilike(f"%{search_term}%"),
+                Product.description.ilike(f"%{search_term}%"),
+                Product.sku.ilike(f"%{search_term}%"),
+                cast(Product.tags, Text).ilike(f"%{search_term}%"),
             )
         )
     if on_sale:

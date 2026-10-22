@@ -17,12 +17,15 @@ from app.utils.casing import camelize
 # --- Discounts ---
 
 async def validate_discount(
-    db: AsyncSession, code: str, subtotal: float
+    db: AsyncSession, code: str, subtotal: float, *, consume: bool = False
 ) -> dict | None:
-    """Validate a discount code and return the discount amount if valid."""
-    discount = await db.scalar(
-        select(Discount).where(Discount.code == code, Discount.is_active.is_(True))
+    """Validate a code; optionally reserve one use in the current transaction."""
+    statement = select(Discount).where(
+        Discount.code == code.strip().upper(), Discount.is_active.is_(True)
     )
+    if consume:
+        statement = statement.with_for_update()
+    discount = await db.scalar(statement)
 
     if not discount:
         return None
@@ -38,6 +41,8 @@ async def validate_discount(
         return None
 
     amount = subtotal * (discount.percentage / 100)
+    if consume:
+        discount.current_uses += 1
 
     return {
         "code": discount.code,
