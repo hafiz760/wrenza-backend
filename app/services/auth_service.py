@@ -1,8 +1,9 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,6 +22,12 @@ from app.core.security import (
 from app.db.models.user import User, UserRole
 from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, TokenResponse
 from app.schemas.user import UserOut
+from app.services.email_verification import (
+    consume_email_verification_code,
+    consume_password_reset_code,
+    issue_email_verification_code,
+    issue_password_reset_code,
+)
 from app.tasks.queue import enqueue
 
 logger = structlog.get_logger()
@@ -46,6 +53,7 @@ def _user_to_out(user: User) -> UserOut:
     return UserOut(
         id=str(user.id),
         email=user.email,
+        email_verified=user.email_verified_at is not None,
         first_name=user.first_name,
         last_name=user.last_name,
         phone=user.phone,
@@ -68,9 +76,11 @@ def _user_to_out(user: User) -> UserOut:
     )
 
 
-async def register(db: AsyncSession, data: RegisterRequest) -> AuthResponse:
-    # Check email uniqueness
-    existing = await db.scalar(select(User).where(User.email == data.email))
+async def register(db: AsyncSession, redis: Redis, data: RegisterRequest) -> None:
+    normalized_email = str(data.email).strip().lower()
+    existing = await db.scalar(
+        select(User).where(func.lower(User.email) == normalized_email)
+    )
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -80,7 +90,7 @@ async def register(db: AsyncSession, data: RegisterRequest) -> AuthResponse:
     user = User(
         first_name=data.first_name,
         last_name=data.last_name,
-        email=data.email,
+        email=normalized_email,
         password_hash=await hash_password(data.password),
         phone=data.phone,
         role=UserRole.CUSTOMER,
@@ -88,20 +98,66 @@ async def register(db: AsyncSession, data: RegisterRequest) -> AuthResponse:
     db.add(user)
     await db.commit()
 
-    # Reload with addresses relationship for _user_to_out
-    result = await db.execute(
-        select(User).options(selectinload(User.addresses)).where(User.id == user.id)
-    )
-    user = result.scalar_one()
+    queued = await issue_email_verification_code(redis, normalized_email)
+    if not queued:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Your account was created, but the verification email could not be "
+                "queued. Request a new code to continue."
+            ),
+        )
 
-    return _build_auth_response(user)
+
+async def resend_email_verification(db: AsyncSession, redis: Redis, email: str) -> None:
+    normalized_email = email.strip().lower()
+    user = await db.scalar(
+        select(User).where(func.lower(User.email) == normalized_email)
+    )
+    if not user or not user.is_active or user.email_verified_at is not None:
+        return
+
+    queued = await issue_email_verification_code(redis, normalized_email)
+    if not queued:
+        logger.info("Verification resend skipped", email=normalized_email)
+
+
+async def verify_email(
+    db: AsyncSession, redis: Redis, email: str, code: str
+) -> AuthResponse:
+    normalized_email = email.strip().lower()
+    user = await db.scalar(
+        select(User).where(func.lower(User.email) == normalized_email)
+    )
+    invalid_code = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="The verification code is invalid or expired.",
+    )
+    if (
+        not user
+        or not user.is_active
+        or user.email_verified_at is not None
+        or not await consume_email_verification_code(redis, normalized_email, code)
+    ):
+        raise invalid_code
+
+    user.email_verified_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    result = await db.execute(
+        select(User)
+        .options(selectinload(User.addresses))
+        .where(User.id == user.id)
+    )
+    verified_user = result.scalar_one()
+    return _build_auth_response(verified_user)
 
 
 async def login(db: AsyncSession, data: LoginRequest) -> AuthResponse:
     result = await db.execute(
         select(User)
         .options(selectinload(User.addresses))
-        .where(User.email == data.email)
+        .where(func.lower(User.email) == str(data.email).strip().lower())
     )
     user = result.scalar_one_or_none()
 
@@ -115,6 +171,12 @@ async def login(db: AsyncSession, data: LoginRequest) -> AuthResponse:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
+        )
+
+    if user.email_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email address before signing in.",
         )
 
     return _build_auth_response(user)
@@ -142,7 +204,11 @@ async def refresh_tokens(
         )
 
     user = await db.scalar(
-        select(User).where(User.id == UUID(user_id), User.is_active.is_(True))
+        select(User).where(
+            User.id == UUID(user_id),
+            User.is_active.is_(True),
+            User.email_verified_at.is_not(None),
+        )
     )
     if not user:
         raise HTTPException(
@@ -214,6 +280,51 @@ async def request_password_reset(db: AsyncSession, email: str) -> None:
 
     token = create_password_reset_token(user.id)
     await enqueue("send_password_reset", user.email, token)
+
+
+async def request_password_reset_otp(
+    db: AsyncSession, redis: Redis, email: str
+) -> None:
+    """Queue a reset OTP for an active, verified account, if one exists."""
+    normalized_email = email.strip().lower()
+    user = await db.scalar(
+        select(User).where(func.lower(User.email) == normalized_email)
+    )
+    if (
+        not user
+        or user.role != UserRole.CUSTOMER
+        or not user.is_active
+        or user.email_verified_at is None
+    ):
+        logger.info("Password reset OTP skipped")
+        return
+
+    queued = await issue_password_reset_code(redis, normalized_email)
+    if not queued:
+        logger.info("Password reset OTP not queued")
+
+
+async def verify_password_reset_otp(
+    db: AsyncSession, redis: Redis, email: str, code: str
+) -> str:
+    """Consume a reset OTP and issue the token used by the password update API."""
+    normalized_email = email.strip().lower()
+    user = await db.scalar(
+        select(User).where(func.lower(User.email) == normalized_email)
+    )
+    if (
+        not user
+        or user.role != UserRole.CUSTOMER
+        or not user.is_active
+        or user.email_verified_at is None
+        or not await consume_password_reset_code(redis, normalized_email, code)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The verification code is invalid or expired.",
+        )
+
+    return create_password_reset_token(user.id)
 
 
 async def reset_password(

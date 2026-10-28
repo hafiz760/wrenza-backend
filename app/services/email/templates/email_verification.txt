@@ -1,0 +1,12 @@
+VERIFY YOUR WRENZA ACCOUNT
+
+Enter this code to finish creating your Wrenza account:
+
+{{ code }}
+
+This code expires in {{ expires_minutes }} minutes. Do not share it with anyone.
+
+If you did not try to create a Wrenza account, you can ignore this email.
+
+—
+Wrenza. Cut and stitched by hand in Lahore.

@@ -40,6 +40,7 @@ class AddressOut(CamelModel):
 class UserOut(CamelModel):
     id: str
     email: str
+    email_verified: bool = False
     first_name: str
     last_name: str
     phone: str | None = None

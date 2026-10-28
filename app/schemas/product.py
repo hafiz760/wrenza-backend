@@ -158,6 +158,8 @@ class ProductOut(CamelModel):
     sku: str | None = None
     canonical_url: str | None = None
     og_image: str | None = None
+    meta_title: str | None = None
+    meta_description: str | None = None
     short_description: str | None = None
     description: str
     kind: Literal["simple", "variable"] = "simple"

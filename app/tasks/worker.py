@@ -5,10 +5,12 @@ from app.core.config import get_settings
 from app.tasks.email_tasks import (
     send_contact_enquiry,
     send_contact_confirmation,
+    send_email_verification_code,
     send_order_cancelled,
     send_order_confirmation,
     send_order_status_update,
     send_password_reset,
+    send_password_reset_code,
 )
 from app.tasks.maintenance_tasks import (
     cleanup_expired_discounts,
@@ -49,6 +51,8 @@ class WorkerSettings:
         send_order_status_update,
         send_order_cancelled,
         send_password_reset,
+        send_password_reset_code,
+        send_email_verification_code,
         send_contact_enquiry,
         send_contact_confirmation,
     ]

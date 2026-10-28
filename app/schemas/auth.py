@@ -56,6 +56,24 @@ class ForgotPasswordRequest(CamelModel):
     email: EmailStr
 
 
+class VerifyEmailRequest(CamelModel):
+    email: EmailStr
+    code: Annotated[str, Field(min_length=6, max_length=6, pattern=r"^\d{6}$")]
+
+
+class ResendEmailVerificationRequest(CamelModel):
+    email: EmailStr
+
+
 class ResetPasswordRequest(CamelModel):
     token: Annotated[str, Field(min_length=1, max_length=500)]
     new_password: PasswordStr
+
+
+class VerifyPasswordResetOtpRequest(CamelModel):
+    email: EmailStr
+    code: Annotated[str, Field(min_length=6, max_length=6, pattern=r"^\d{6}$")]
+
+
+class PasswordResetTokenResponse(CamelModel):
+    reset_token: str
