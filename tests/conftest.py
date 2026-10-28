@@ -1,5 +1,6 @@
 import asyncio
 import fnmatch
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -136,6 +137,7 @@ async def test_user():
             email="test@example.com",
             password_hash=hash_password_sync("password123"),
             role=UserRole.CUSTOMER,
+            email_verified_at=datetime.now(timezone.utc),
         )
         db.add(user)
         await db.commit()
@@ -154,6 +156,7 @@ async def admin_user():
             email="admin@example.com",
             password_hash=hash_password_sync("admin123"),
             role=UserRole.ADMIN,
+            email_verified_at=datetime.now(timezone.utc),
         )
         db.add(user)
         await db.commit()

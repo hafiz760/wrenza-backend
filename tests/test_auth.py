@@ -1,8 +1,18 @@
 import pytest
 
 
+@pytest.fixture
+def verification_queue(monkeypatch):
+    async def accept_verification_job(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(
+        "app.services.email_verification.enqueue", accept_verification_job
+    )
+
+
 @pytest.mark.asyncio
-async def test_register(client):
+async def test_register(client, verification_queue):
     response = await client.post(
         "/api/v1/auth/register",
         json={
@@ -13,16 +23,14 @@ async def test_register(client):
             "phone": "+92 300 1234567",
         },
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert "accessToken" in data
-    assert "refreshToken" in data
+    assert response.status_code == 202
+    assert response.json() == {"message": "Verification code sent. Check your email."}
 
 
 @pytest.mark.asyncio
-async def test_register_duplicate_email(client):
+async def test_register_duplicate_email(client, verification_queue):
     # Register first
-    await client.post(
+    first = await client.post(
         "/api/v1/auth/register",
         json={
             "firstName": "User",
@@ -31,6 +39,7 @@ async def test_register_duplicate_email(client):
             "password": "password123",
         },
     )
+    assert first.status_code == 202
 
     # Try registering again with same email
     response = await client.post(
