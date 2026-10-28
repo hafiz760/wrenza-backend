@@ -54,7 +54,11 @@ async def get_current_user(
     result = await db.execute(
         select(User)
         .options(selectinload(User.addresses))
-        .where(User.id == UUID(user_id), User.is_active.is_(True))
+        .where(
+            User.id == UUID(user_id),
+            User.is_active.is_(True),
+            User.email_verified_at.is_not(None),
+        )
     )
     user = result.scalar_one_or_none()
 
@@ -89,7 +93,11 @@ async def get_current_user_optional(
         return None  # treated as a guest, matching other invalid-token paths
 
     result = await db.execute(
-        select(User).where(User.id == UUID(user_id), User.is_active.is_(True))
+        select(User).where(
+            User.id == UUID(user_id),
+            User.is_active.is_(True),
+            User.email_verified_at.is_not(None),
+        )
     )
     return result.scalar_one_or_none()
 

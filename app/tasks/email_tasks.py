@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
+from app.core.security import decrypt_email_verification_code
 from app.db.models.order import Order
 from app.db.session import AsyncSessionLocal
 from app.services.email import Mailbox, send_email
@@ -181,6 +182,42 @@ async def send_password_reset(ctx: dict, email: str, token: str) -> None:
         preheader="Use this link within 30 minutes.",
         reset_url=reset_url,
         expires_minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES,
+    )
+    await send_email(Mailbox.INFO, to=email, subject=subject, html=html, text=text)
+
+
+async def send_email_verification_code(
+    ctx: dict, email: str, encrypted_code: str
+) -> None:
+    """Send a short-lived registration code from the information mailbox."""
+    settings = get_settings()
+    code = decrypt_email_verification_code(encrypted_code)
+    expires_minutes = settings.EMAIL_VERIFICATION_CODE_EXPIRE_MINUTES
+    subject = "Verify your Wrenza account"
+    html, text = render(
+        "email_verification",
+        subject=subject,
+        preheader=f"Your verification code expires in {expires_minutes} minutes.",
+        code=code,
+        expires_minutes=expires_minutes,
+    )
+    await send_email(Mailbox.INFO, to=email, subject=subject, html=html, text=text)
+
+
+async def send_password_reset_code(
+    ctx: dict, email: str, encrypted_code: str
+) -> None:
+    """Send a two-minute password reset code from the information mailbox."""
+    settings = get_settings()
+    code = decrypt_email_verification_code(encrypted_code)
+    expires_minutes = settings.EMAIL_VERIFICATION_CODE_EXPIRE_MINUTES
+    subject = "Your Wrenza password reset code"
+    html, text = render(
+        "password_reset_code",
+        subject=subject,
+        preheader=f"Your password reset code expires in {expires_minutes} minutes.",
+        code=code,
+        expires_minutes=expires_minutes,
     )
     await send_email(Mailbox.INFO, to=email, subject=subject, html=html, text=text)
 

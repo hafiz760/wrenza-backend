@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query
 
 from app.core.deps import DbSession, RedisClient
 from app.schemas.filters import ProductFiltersOut
+from app.schemas.product import ProductOut
 from app.schemas.review import ProductReviewsOut
 from app.services import product_service, review_service
 
@@ -81,7 +82,7 @@ async def get_product_reviews(
     return await review_service.list_public_reviews(db, slug, page, pageSize)
 
 
-@router.get("/{slug}")
+@router.get("/{slug}", response_model=ProductOut)
 async def get_product(slug: str, db: DbSession, redis: RedisClient):
     return await product_service.get_by_slug(db, redis, slug)
 

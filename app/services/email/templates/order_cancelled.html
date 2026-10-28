@@ -3,8 +3,9 @@
 {% block content %}
 <p style="margin:0 0 4px;font-size:11px;letter-spacing:1.5px;color:#6b7280;
           text-transform:uppercase;">Order cancelled</p>
-<p style="margin:0 0 20px;font-family:Georgia,'Times New Roman',serif;
-          font-size:28px;color:#111111;">{{ order_number }}</p>
+<p style="margin:0 0 20px;font-size:26px;font-weight:600;color:#111111;">
+  {{ order_number }}
+</p>
 
 <p style="margin:0 0 20px;">
   {% if customer_name %}{{ customer_name }}, this{% else %}This{% endif %} order has
@@ -25,8 +26,9 @@
     <td style="background-color:#111111;">
       <a href="{{ frontend_url }}/products"
          style="display:inline-block;padding:13px 26px;font-size:14px;
-                font-weight:600;color:#ffffff;text-decoration:none;">
-        Browse the collection
+                font-weight:600;letter-spacing:1.5px;color:#ffffff;
+                text-decoration:none;text-transform:uppercase;">
+        Shop the collection
       </a>
     </td>
   </tr>

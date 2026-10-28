@@ -49,6 +49,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wrenza-db}
       REDIS_URL: redis://redis:6379/0
       POSTGRES_HOST: postgres
+      AUTH_RATE_LIMITS_ENABLED: "true"
       DEBUG: "false"
     ports:
       # Bound to loopback: nginx or Caddy terminates TLS and proxies here.

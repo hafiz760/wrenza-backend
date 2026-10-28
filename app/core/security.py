@@ -1,8 +1,11 @@
 import asyncio
+import base64
+import hashlib
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import bcrypt
+from cryptography.fernet import Fernet
 from jose import JWTError, jwt
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -89,6 +92,26 @@ def create_password_reset_token(user_id: UUID) -> str:
         "jti": uuid4().hex,
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def encrypt_email_verification_code(code: str) -> str:
+    """Encrypt an OTP before placing it in the background-job queue."""
+    settings = get_settings()
+    key_material = hashlib.sha256(
+        f"wz:email-verification:v1:{settings.SECRET_KEY}".encode("utf-8")
+    ).digest()
+    key = base64.urlsafe_b64encode(key_material)
+    return Fernet(key).encrypt(code.encode("ascii")).decode("ascii")
+
+
+def decrypt_email_verification_code(encrypted_code: str) -> str:
+    """Decrypt a queued OTP in the email worker."""
+    settings = get_settings()
+    key_material = hashlib.sha256(
+        f"wz:email-verification:v1:{settings.SECRET_KEY}".encode("utf-8")
+    ).digest()
+    key = base64.urlsafe_b64encode(key_material)
+    return Fernet(key).decrypt(encrypted_code.encode("ascii")).decode("ascii")
 
 
 def decode_token(token: str) -> dict:

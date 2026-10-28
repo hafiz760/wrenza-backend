@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # Short by design: a reset link sits in an inbox, which is exactly where
     # an attacker with mailbox access would look.
     PASSWORD_RESET_EXPIRE_MINUTES: int = 30
+    EMAIL_VERIFICATION_CODE_EXPIRE_MINUTES: int = 2
+    EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: int = 60
+    EMAIL_VERIFICATION_MAX_ATTEMPTS: int = 5
+    AUTH_RATE_LIMITS_ENABLED: bool = True
 
     # Cloudinary
     CLOUDINARY_CLOUD_NAME: str = ""

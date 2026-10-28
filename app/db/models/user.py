@@ -28,6 +28,9 @@ class User(Base, UUIDMixin, TimestampMixin):
         default=UserRole.CUSTOMER,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships (use string refs to avoid circular imports)
     addresses: Mapped[list["Address"]] = relationship(
