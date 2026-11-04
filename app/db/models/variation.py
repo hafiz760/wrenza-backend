@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -86,6 +87,7 @@ class ProductVariation(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     gtin: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     values: Mapped[list["VariationAttributeValue"]] = relationship(
         back_populates="variation",
