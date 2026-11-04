@@ -885,6 +885,7 @@ async def create_product(
         stock=data.stock,
         is_featured=data.is_featured,
         is_new_arrival=data.is_new_arrival,
+        is_indexable=data.is_indexable,
         meta_title=data.meta_title,
         meta_description=data.meta_description,
     )
