@@ -168,3 +168,49 @@ async def test_public_payload_omits_active_status(client, admin_headers):
     response = await client.get("/api/v1/collections")
     row = next(c for c in response.json() if c["slug"] == "public-edit")
     assert "isActive" not in row
+
+
+@pytest.mark.asyncio
+async def test_collection_seo_fields_round_trip(client, admin_headers):
+    seo = {
+        "metaTitle": "Travel wallets | Wrenza",
+        "metaDescription": "Wallets for everyday travel.",
+        "canonicalUrl": "https://wrenza.com/collections/travel-edit",
+        "isIndexable": False,
+    }
+    created = await _collection(client, admin_headers, name="Travel Edit", **seo)
+    for key, value in seo.items():
+        assert created[key] == value
+    assert created["updatedAt"] is not None
+
+    for url in ("/api/v1/admin/collections", "/api/v1/collections"):
+        response = await client.get(url, headers=admin_headers)
+        row = next(c for c in response.json() if c["id"] == created["id"])
+        for key, value in seo.items():
+            assert row[key] == value
+
+    response = await client.get("/api/v1/collections/travel-edit")
+    assert response.status_code == 200
+    for key, value in seo.items():
+        assert response.json()[key] == value
+
+    changed = {"metaTitle": "New title", "metaDescription": None,
+               "canonicalUrl": None, "isIndexable": True}
+    response = await client.put(
+        f"/api/v1/admin/collections/{created['id']}",
+        headers=admin_headers, json=changed,
+    )
+    assert response.status_code == 200, response.text
+    for key, value in changed.items():
+        assert response.json()[key] == value
+    response = await client.get("/api/v1/collections/travel-edit")
+    for key, value in changed.items():
+        assert response.json()[key] == value
+
+
+@pytest.mark.asyncio
+async def test_collection_create_respects_inactive_status(client, admin_headers):
+    created = await _collection(client, admin_headers, name="Inactive Create", isActive=False)
+    assert created["isActive"] is False
+    public = await client.get("/api/v1/collections/inactive-create")
+    assert public.status_code == 404
