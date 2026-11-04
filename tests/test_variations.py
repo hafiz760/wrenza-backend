@@ -75,6 +75,33 @@ async def test_generate_seeds_price_from_product(client, admin_headers, setup):
 
 
 @pytest.mark.asyncio
+async def test_variation_description_round_trip_and_clear(client, admin_headers, setup):
+    pid = setup["product_id"]
+    generated = await client.post(
+        f"/api/v1/admin/products/{pid}/variations/generate", headers=admin_headers
+    )
+    assert generated.status_code == 200
+    first, second = generated.json()
+    assert first["description"] is None
+    saved = await client.put(
+        f"/api/v1/admin/products/{pid}/variations", headers=admin_headers,
+        json={"variations": [{"id": first["id"], "description": "Black leather wallet with silver hardware."}]},
+    )
+    assert saved.status_code == 200, saved.text
+    assert next(v for v in saved.json() if v["id"] == first["id"])["description"] == "Black leather wallet with silver hardware."
+    public = await client.get(f"/api/v1/products/{setup['slug']}")
+    assert next(v for v in public.json()["variations"] if v["id"] == first["id"])["description"] == "Black leather wallet with silver hardware."
+    assert next(v for v in public.json()["variations"] if v["id"] == second["id"])["description"] is None
+    cleared = await client.put(
+        f"/api/v1/admin/products/{pid}/variations", headers=admin_headers,
+        json={"variations": [{"id": first["id"], "description": None}]},
+    )
+    assert cleared.status_code == 200
+    public = await client.get(f"/api/v1/products/{setup['slug']}")
+    assert next(v for v in public.json()["variations"] if v["id"] == first["id"])["description"] is None
+
+
+@pytest.mark.asyncio
 async def test_regenerating_is_non_destructive(client, admin_headers, setup):
     pid = setup["product_id"]
     first = await client.post(

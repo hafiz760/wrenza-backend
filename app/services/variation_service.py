@@ -89,6 +89,7 @@ def _variation_out(v: ProductVariation, terms: dict) -> VariationOut:
         id=str(v.id),
         sku=v.sku,
         gtin=v.gtin,
+        description=v.description,
         price=float(v.price),
         compare_at_price=float(v.compare_at_price) if v.compare_at_price else None,
         stock=v.stock,
