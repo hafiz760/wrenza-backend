@@ -41,6 +41,7 @@ class CollectionCreate(CamelModel):
     season: Annotated[str, Field(min_length=1, max_length=50)] | None = None
     year: Annotated[int, Field(ge=1900, le=2100)] | None = None
     is_featured: bool = False
+    is_active: bool = True
     is_indexable: bool = True
     meta_title: Annotated[str, Field(min_length=1, max_length=255)] | None = None
     meta_description: Annotated[str, Field(min_length=1, max_length=2000)] | None = None

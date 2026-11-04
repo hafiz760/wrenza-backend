@@ -20,7 +20,12 @@ def _collection_to_out(c: Collection, *, include_status: bool = False) -> dict:
         "season": c.season,
         "year": c.year,
         "is_featured": c.is_featured,
+        "is_indexable": c.is_indexable,
+        "meta_title": c.meta_title,
+        "meta_description": c.meta_description,
+        "canonical_url": c.canonical_url,
         "created_at": c.created_at.isoformat() if c.created_at else None,
+        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
     }
     # The public listing only ever returns active collections, so the flag
     # would always be true there. The admin needs it to render the status and
@@ -77,6 +82,11 @@ async def create_collection(db: AsyncSession, data: CollectionCreate) -> dict:
         season=data.season,
         year=data.year,
         is_featured=data.is_featured,
+        is_active=data.is_active,
+        is_indexable=data.is_indexable,
+        meta_title=data.meta_title,
+        meta_description=data.meta_description,
+        canonical_url=data.canonical_url,
     )
     db.add(collection)
     await db.commit()
