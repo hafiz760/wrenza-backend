@@ -1,5 +1,5 @@
 from app.db.models.user import User, Address
-from app.db.models.product import Product, ProductImage, Category, Collection
+from app.db.models.product import Product, ProductImage, ProductSlugHistory, Category, Collection
 from app.db.models.order import Order, OrderItem
 from app.db.models.review import Review, Testimonial
 from app.db.models.promotion import Discount, Banner

@@ -145,6 +145,15 @@ class Product(Base, UUIDMixin, TimestampMixin):
     )
 
 
+class ProductSlugHistory(Base, UUIDMixin):
+    __tablename__ = "product_slug_history"
+
+    slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), index=True
+    )
+
+
 class ProductImage(Base, UUIDMixin):
     __tablename__ = "product_images"
     __table_args__ = (

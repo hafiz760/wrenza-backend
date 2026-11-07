@@ -71,6 +71,22 @@ async def get_new_arrivals(db: DbSession, redis: RedisClient):
 
 
 # Declared before "/{slug}" so the literal segment is not captured as a slug
+@router.get("/slug-redirect/{slug}")
+async def resolve_product_slug_redirect(slug: str, db: DbSession):
+    """Resolve only historical slugs; current and unknown slugs return 404."""
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.db.models.product import Product, ProductSlugHistory
+
+    current = await db.scalar(
+        select(Product.slug).join(ProductSlugHistory, ProductSlugHistory.product_id == Product.id)
+        .where(ProductSlugHistory.slug == slug, Product.is_active.is_(True))
+    )
+    if not current or current == slug:
+        raise HTTPException(status_code=404, detail="No product redirect")
+    return {"slug": current}
+
+
 @router.get("/{slug}/reviews", response_model=ProductReviewsOut)
 async def get_product_reviews(
     slug: str,

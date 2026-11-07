@@ -1,15 +1,16 @@
 import hashlib
 import json
 from uuid import UUID
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import HTTPException
 from redis.asyncio import Redis
-from sqlalchemy import Text, and_, asc, cast, desc, func, or_, select
+from sqlalchemy import Text, and_, asc, cast, desc, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models.attribute import Attribute, AttributeTerm
-from app.db.models.product import Product, ProductImage, Category
+from app.db.models.product import Product, ProductImage, ProductSlugHistory, Category
 from app.db.models.variation import (
     ProductAttribute,
     ProductAttributeTerm,
@@ -46,7 +47,7 @@ from app.utils.cache import (
     cache_set,
 )
 from app.utils.pagination import paginate
-from app.utils.slug import ensure_unique_slug, generate_slug
+from app.utils.slug import generate_slug
 
 
 def _image_to_out(img: ProductImage) -> ProductImageOut:
@@ -725,6 +726,9 @@ async def get_by_slug(db: AsyncSession, redis: Redis | None, slug: str) -> Produ
         if cached is not None:
             return ProductOut.model_validate(cached)
 
+    historical_product_id = select(ProductSlugHistory.product_id).where(
+        ProductSlugHistory.slug == slug
+    ).scalar_subquery()
     result = await db.execute(
         select(Product)
         .options(
@@ -732,7 +736,7 @@ async def get_by_slug(db: AsyncSession, redis: Redis | None, slug: str) -> Produ
             selectinload(Product.category),
             selectinload(Product.variations),
         )
-        .where(Product.slug == slug, Product.is_active.is_(True))
+        .where(or_(Product.slug == slug, Product.id == historical_product_id), Product.is_active.is_(True))
     )
     product = result.scalar_one_or_none()
 
@@ -855,11 +859,34 @@ async def get_related(
     return [_product_to_list_out(p, swatches.get(str(p.id))) for p in products]
 
 
+async def _lock_product_slug_namespace(db: AsyncSession) -> None:
+    # Serialize slug allocation across current and historical tables on PostgreSQL.
+    if db.bind.dialect.name == "postgresql":
+        await db.execute(text("SELECT pg_advisory_xact_lock(824613730)"))
+
+
+async def _unique_product_slug(db: AsyncSession, slug: str, product_id=None) -> str:
+    base = slug
+    counter = 1
+    while True:
+        active = await db.scalar(select(Product.id).where(Product.slug == slug))
+        historical = await db.scalar(
+            select(ProductSlugHistory.product_id).where(ProductSlugHistory.slug == slug)
+        )
+        if (active is None or str(active) == str(product_id)) and (
+            historical is None or str(historical) == str(product_id)
+        ):
+            return slug
+        slug = f"{base}-{counter}"
+        counter += 1
+
+
 async def create_product(
     db: AsyncSession, redis: Redis | None, data: ProductCreate
 ) -> ProductOut:
     slug = data.slug or generate_slug(data.name)
-    slug = await ensure_unique_slug(db, Product, slug)
+    await _lock_product_slug_namespace(db)
+    slug = await _unique_product_slug(db, slug)
 
     product = Product(
         slug=slug,
@@ -936,6 +963,7 @@ async def create_product(
 async def update_product(
     db: AsyncSession, redis: Redis | None, product_id: str, data: ProductUpdate
 ) -> ProductOut:
+    await _lock_product_slug_namespace(db)
     result = await db.execute(
         select(Product)
         .options(selectinload(Product.images), selectinload(Product.category))
@@ -947,11 +975,27 @@ async def update_product(
 
     update_data = data.model_dump(exclude_unset=True)
 
-    # Handle slug update
+    # Preserve old URLs and allow a product to reclaim its own previous slug.
     if "slug" in update_data and update_data["slug"]:
-        update_data["slug"] = await ensure_unique_slug(
-            db, Product, update_data["slug"], exclude_id=product.id
-        )
+        new_slug = await _unique_product_slug(db, update_data["slug"], product.id)
+        old_slug = product.slug
+        update_data["slug"] = new_slug
+        if new_slug != old_slug:
+            owned_alias = await db.scalar(select(ProductSlugHistory).where(
+                ProductSlugHistory.slug == new_slug,
+                ProductSlugHistory.product_id == product.id,
+            ))
+            if owned_alias:
+                await db.delete(owned_alias)
+                await db.flush()
+            db.add(ProductSlugHistory(slug=old_slug, product_id=product.id))
+            # Update only self-canonicals; keep intentional third-party or
+            # cross-product canonical choices intact.
+            canonical = update_data.get("canonical_url", product.canonical_url)
+            if canonical:
+                parts = urlsplit(canonical)
+                if parts.hostname in {"wrenza.com", "www.wrenza.com"} and parts.path.rstrip("/") == f"/products/{old_slug}":
+                    update_data["canonical_url"] = urlunsplit((parts.scheme, parts.netloc, f"/products/{new_slug}", parts.query, parts.fragment))
 
     # Convert nested Pydantic models to dicts for JSONB
     if "dimensions" in update_data and update_data["dimensions"] is not None:
