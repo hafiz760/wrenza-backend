@@ -36,8 +36,14 @@ class CategoryOut(CamelModel):
     meta_description: str | None = None
     canonical_url: str | None = None
     is_indexable: bool
+    faqs: list["CategoryFaq"] = Field(default_factory=list)
     updated_at: datetime
     children: list["CategoryOut"] = Field(default_factory=list)
+
+
+class CategoryFaq(CamelModel):
+    question: Annotated[str, Field(min_length=3, max_length=300)]
+    answer: Annotated[str, Field(min_length=3, max_length=1000)]
 
 
 class CategoryCreate(CamelModel):
@@ -55,6 +61,7 @@ class CategoryCreate(CamelModel):
     meta_description: Annotated[str, Field(min_length=1, max_length=2000)] | None = None
     canonical_url: Annotated[str, Field(max_length=500)] | None = None
     is_indexable: bool = True
+    faqs: list[CategoryFaq] = Field(default_factory=list, max_length=12)
     parent_id: UUID | None = None
 
     @field_validator("parent_id", mode="before")
@@ -80,6 +87,7 @@ class CategoryUpdate(CamelModel):
     meta_description: Annotated[str, Field(min_length=1, max_length=2000)] | None = None
     canonical_url: Annotated[str, Field(max_length=500)] | None = None
     is_indexable: bool | None = None
+    faqs: list[CategoryFaq] = Field(default_factory=list, max_length=12)
     parent_id: UUID | None = None
     is_active: bool | None = None
 
