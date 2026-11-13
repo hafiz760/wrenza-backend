@@ -24,6 +24,7 @@ def _category_out(c: Category) -> dict:
         "meta_description": c.meta_description,
         "canonical_url": c.canonical_url,
         "is_indexable": c.is_indexable,
+        "faqs": c.faqs or [],
         "updated_at": c.updated_at,
         "parent_id": str(c.parent_id) if c.parent_id else None,
         "is_active": c.is_active,
@@ -72,6 +73,7 @@ async def create_category(data: CategoryCreate, admin: AdminUser, db: DbSession,
         meta_description=data.meta_description,
         canonical_url=data.canonical_url,
         is_indexable=data.is_indexable,
+        faqs=[faq.model_dump() for faq in data.faqs],
         parent_id=data.parent_id,
     )
     db.add(category)

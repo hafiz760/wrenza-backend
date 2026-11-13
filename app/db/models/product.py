@@ -37,6 +37,7 @@ class Category(Base, UUIDMixin, TimestampMixin):
     meta_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     meta_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     canonical_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    faqs: Mapped[list[dict]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
 
     # Relationships
     parent: Mapped["Category | None"] = relationship(
